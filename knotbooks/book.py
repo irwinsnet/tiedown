@@ -1,5 +1,7 @@
 
 import enum
+import os.path
+import pathlib
 import re
 
 import nbformat
@@ -20,6 +22,9 @@ class Book:
 
     def __getitem__(self, idx):
         return self.cells[idx]
+
+    def __len__(self):
+        return len(self.cells)
 
     @property
     def cells(self):
@@ -55,30 +60,7 @@ class Book:
         nbformat.write(self, path, 4)
 
 
-    def get_command(self, cell):
-        """Extracts a command and arguments from a cell.
-        
-        Args:
-            cell: A dictionary object from an nbformat notebook object.
-
-        Returns a dictionary with two keys:
-            * "command": The command name, such as "insert" or "block".
-            * "args": A list of the arguments that followed the command.
-                      Returns an empty list if there are no arguments.
-
-        If the cell doesn't contain a command or is not a markdown
-        cell, returns {"command": None, "args": []}
-        """
-        command = {"command": None, "args": []}
-        if cell["cell_type"] == "markdown":
-            match = self.pattern_command.match(cell["source"])
-            if match is not None:
-                tokens = match.group(1).split()
-                command = {"command": tokens[0].lower(),
-                           "args": tokens[1:]}
-        return command
-
-    def get_commands(self, cell, as_dict=False):
+    def get_commands(self, cell, as_dict=True):
         """Extracts all commands from a cell.
 
         Args:
@@ -117,11 +99,9 @@ class Template(Book):
         """
         inserts = []
         for cell_idx, cell in enumerate(self.book.cells):
-            cmd = self.get_command(cell)
-            if cmd["command"] == "insert" and len(cmd["args"]) >= 1:
-                    insert = {"tag": cmd["args"][0],
-                              "cell_idx": cell_idx}
-                    inserts.append(insert)
+            cmds = self.get_commands(cell)
+            if "insert" in cmds:
+                inserts.append({"tag": cmds["insert"][0], "cell_idx": cell_idx})
         return inserts
 
     def embed_knotbook(self, kb):
@@ -142,7 +122,7 @@ class Template(Book):
         # Merge content from template and Knotbook
         content_blocks = kb.get_blocks()            
         if Enums.KB_PAGE_COMMANDS in content_blocks:
-            output_nb.cells.append(content_blocks[Enums.KB_PAGE_COMMANDS])
+            output_nb.cells.append(content_blocks[Enums.KB_PAGE_COMMANDS][0])
         for cell in self.cells:
             commands = kb.get_commands(cell)
             if "insert" in commands:
@@ -168,12 +148,11 @@ class Knotbook(Book):
         template = ""  # Case if no {% template ... %} command - use default.
         # Check for {% template ... %} command
         cmds = self.get_commands(0)
-        for cmd in cmds:
-            if cmd["command"] == "template":
-                if cmd["args"][0] == "None":
-                    template = None
-                else:
-                    template =cmd["args"][0] + ".ipynb"
+        if "template" in cmds:
+            if cmds["template"][0] == "None":
+                template = None
+            else:
+                template = cmds["template"][0] + ".ipynb"
         return template
 
     def get_blocks(self):
@@ -183,23 +162,25 @@ class Knotbook(Book):
             notebook: An nbformat notebook object.
         
         Returns: A dictionary. The keys are the block names and the
-        values are lists of cells contained in the block.        
+        values are lists of cells contained in the block. If the
+        content notebook contains a command cell, that cell will be
+        included in the dictionary with key `Enums.KB_PAGE_COMMANDS`.
         """
         blocks = {}
-        if self.get_commands(0, True):
-            blocks[Enums.KB_PAGE_COMMANDS] = self[0]
+        if self.get_commands(0):
+            blocks[Enums.KB_PAGE_COMMANDS] = [self[0]]
 
         in_block = False
         block_name = None
         for cell in self.book.cells:
-            command = self.get_command(cell)
+            commands = self.get_commands(cell)
             if not in_block:
-                if command["command"] == "block":
+                if "block" in commands:
                     in_block = True
-                    block_name = command["args"][0]
+                    block_name = commands["block"][0]
                     blocks[block_name] = []
             else:
-                if command["command"] == "endblock":
+                if "endblock" in commands:
                     in_block = False
                     block_name = None
                 else:
@@ -207,6 +188,7 @@ class Knotbook(Book):
         return blocks
 
     def get_title(self):
+        """Finds first H1 Markdown line in notebook. """
         pattern = re.compile(r"^#[^#](.*)$", flags=re.MULTILINE)
         for cell in self.cells:
             if cell["cell_type"] == "markdown":
@@ -214,4 +196,17 @@ class Knotbook(Book):
                 if match is not None:
                     return match.group(1)
         return None
+
+    def rel_link_to(self, from_nb):
+        """Returns relative link (POSIX) to notebook from another notebook.
+        
+        Args:
+            from_path: A pathlib.Path object from which the relative
+            path will be determined.        
+        """
+        from_folder = from_nb.path.parent.as_posix()
+        rel_link = os.path.relpath(self.path, from_folder)
+        rel_link_posix = pathlib.Path(rel_link).as_posix()
+        return rel_link_posix
+
 

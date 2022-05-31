@@ -38,7 +38,9 @@ The commend cell will be replaced with the block named `<block_name>`.
 ```{% toc_entry <toc_entry>%}```
 * If this command is included, the TOC will use `<toc_entry>` in the
 table of contents. Otherwise, Knotbooks will find the first top-level
-markdown heading and use that as the TOC entry. 
+markdown heading and use that as the TOC entry. Note that knotbooks
+searches the content file for the first H1 (i.e., '#') heading.
+It will ignore H1 headings that appear in the template file.
 
 ```{% toc_exclude %}```
 * Exclude from Table of Contents

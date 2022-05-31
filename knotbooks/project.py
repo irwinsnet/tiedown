@@ -1,3 +1,4 @@
+import os.path
 import pathlib
 import re
 import shutil
@@ -50,7 +51,6 @@ class KBProject:
         folders = [path] + sorted(folders, key=lambda x: x.name)
         return folders
 
-
     def iter_notebooks(self, output=False):
         """Iterates over all notebooks in project.
 
@@ -67,13 +67,8 @@ class KBProject:
             nb_paths = list(folder.glob(f"{self.notebook_prefix}*.ipynb"))
             sorted_nbpaths = sorted(nb_paths, key=lambda x: x.name)
             for path_idx, path in enumerate(sorted_nbpaths):
-                yield({
-                    "nb": book.Knotbook(path),
-                    "index": index,
-                    "folder_index": folder_idx,
-                    "rel_index": path_idx})
+                yield book.Knotbook(path)
                 index += 1
-
 
     def _create_output_folder(self, output_path=None):
         """Creates a folder at output_path"""
@@ -85,69 +80,71 @@ class KBProject:
         output_path.mkdir()
         return output_path
 
-
     def get_template(self, template_name=""):
         """Retrieves the main template."""
         if template_name == "":
             template_name = self.default_template
         return book.Template(self.template_folder_path / template_name)      
-                
 
     def first_pass(self, output_path=None):
         self.output_path = self._create_output_folder(output_path)
 
-
         subfolder = None
         for kb in self.iter_notebooks():
             # Get each knotbook and its output location
-            if kb["nb"].path != subfolder:
+            if kb.path != subfolder:
                 # Check for knotbooks in top-level folder
-                if kb["nb"].path.parent == self.content_path:
+                if kb.path.parent == self.content_path:
                     subfolder = self.output_path
                 # Process knotbooks in subfolders
                 else:
-                    subfolder = self.output_path / kb["nb"].path.parts[-2]
+                    subfolder = self.output_path / kb.path.parts[-2]
                     subfolder.mkdir()
             # Create new notebook from knotbook and template
-            template_name = kb["nb"].get_applicable_template()
+            template_name = kb.get_applicable_template()
             if template_name is not None:
                 template = self.get_template(template_name)
-                nb = template.embed_knotbook(kb["nb"])
+                nb = template.embed_knotbook(kb)
             else:
-                nb = kb["nb"]
+                nb = kb
 
-            nb.path = subfolder / kb["nb"].path.parts[-1]
-            rel_path = nb.path.relative_to(self.output_path)
+            nb.path = subfolder / kb.path.parts[-1]
 
             # Process page-level commands
-            cmds = nb.get_commands(0, as_dict=True)
+            cmds = nb.get_commands(0)
             if "target" in cmds:
-                self.links[cmds["target"][0]] = rel_path.as_posix()
+                self.links[cmds["target"][0]] = nb
             if "toc_exclude" not in cmds:
                 if "toc_entry" in cmds:
                     toc_entry = " ".join(cmds["toc_entry"])
                 else:
-                    toc_entry = kb["nb"].get_title()
+                    toc_entry = kb.get_title()
                 if toc_entry is not None:
-                    self.toc.append((toc_entry, rel_path))
+                    self.toc.append((toc_entry, nb.path))
 
 
             # Write notebook to output folder
             nbformat.write(nb.book, nb.path, 4)
 
+    def write_toc(self, relative_to=None):
+        if relative_to is None:
+            relative_to = self.output_path
+        toc = []
+        for entry in self.toc:
+            toc_line = f"[{entry[0]}]({entry[1]})"
 
-    def parse_inserts(self, cell):
+
+    def parse_inserts(self, cell, nb):
         def _make_link(match):
-            return "(" + self.links[match.group(1)] + ")"
-        parsed = self.ptn_insert.sub(_make_link, cell["source"])
-        cell["source"] = parsed
-
+            tgt_nb = self.links[match.group(1)]
+            return "(" + tgt_nb.rel_link_to(nb) + ")"
+        return self.ptn_insert.sub(_make_link, cell["source"])
 
     def second_pass(self):
         for nb in self.iter_notebooks(output=True):
-            for cell in nb["nb"].cells:
-                self.parse_inserts(cell)
-            nbformat.write(nb["nb"].book, nb["nb"].path, 4)
+            for cell in nb.cells:
+               cell["source"] = self.parse_inserts(cell, nb)
+            nbformat.write(nb.book, nb.path, 4)
 
 
         
