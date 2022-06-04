@@ -27,8 +27,8 @@ def project_passed1(kbproject):
     
 
 def test_get_inserts(template):
-    assert template.get_inserts() == [{'tag': 'content', 'cell_idx': 1},
-                                      {'tag': 'other_stuff', 'cell_idx': 3}]
+    assert template.get_inserts() == [{'tag': 'content', 'cell_idx': 2},
+                                      {'tag': 'other_stuff', 'cell_idx': 4}]
 
 
 def test_iter_notebook_paths(kbproject):
@@ -74,12 +74,18 @@ def test_get_blocks(kbproject):
     assert len(blocks["other_stuff"]) == 1
 
 def test_inserts(project_passed1):
-    notebooks = list(project_passed1.iter_notebooks(output=True))
-    parsed_cell = project_passed1.parse_inserts(notebooks[1][3], notebooks[1])
+    notebooks = list(
+        project_passed1.iter_notebooks(project_passed1.output_path))
+    parsed_cell = project_passed1.parse_inserts(notebooks[1][4], notebooks[1])
     assert parsed_cell == r"[Link to Lesson 2](../x/02.ipynb)"
 
     parsed_cell = project_passed1.parse_inserts(notebooks[0][2], notebooks[0])
     assert parsed_cell == "* [Lesson 1](a/01.ipynb)\n* [Lesson 2](x/02.ipynb)"
+
+    parsed_cell = project_passed1.parse_inserts(notebooks[0][3], notebooks[0])
+    assert parsed_cell == (
+        "1. [This is the title of Chapter 1](a/01.ipynb)\n"
+        "2. [This is the title of Chapter 2](x/02.ipynb)")
 
 
 def test_build(project_passed1):

@@ -6,9 +6,10 @@ import re
 
 import nbformat
 
+import knotbooks.utils as utils
+
 class Enums(enum.Enum):
     KB_PAGE_COMMANDS = 0
-
 
 
 class Book:
@@ -18,7 +19,8 @@ class Book:
         else:
             self.book = nbformat.read(path, 4)
         self.path = path
-        self.pattern_command = re.compile(r"{%\s+(.+)\s+%}")
+        self.ptn_command = None
+        self.ptn_outline = None
 
     def __getitem__(self, idx):
         return self.cells[idx]
@@ -29,6 +31,10 @@ class Book:
     @property
     def cells(self):
         return self.book.cells
+
+    @property
+    def markdown_cells(self):
+        return [cell for cell in self.cells if cell["cell_type"] == "markdown"]
 
     @property
     def metadata(self):
@@ -56,8 +62,10 @@ class Book:
         else:
             return nbformat.v4.new_code_cell(source=source)
 
-    def write(self, path):
-        nbformat.write(self, path, 4)
+    def write(self, path=None):
+        if path is None:
+            path = self.path
+        nbformat.write(self.book, path, 4)
 
 
     def get_commands(self, cell, as_dict=True):
@@ -74,10 +82,12 @@ class Book:
         Or if as_dict is True:
         {"template": [None], "link": ["page_1"]}
         """
+        if self.ptn_command is None:
+            self.ptn_command = re.compile(r"{%\s+(.+)\s+%}")
         if isinstance(cell, int):
             cell = self.cells[cell]
         if cell["cell_type"] == "markdown":
-            cmd_strings = self.pattern_command.findall(cell["source"])
+            cmd_strings = self.ptn_command.findall(cell["source"])
             token_lists = [cmd_string.split() for cmd_string in cmd_strings]
             commands = [{"command": tokens[0].lower(), "args": tokens[1:]}
                         for tokens in token_lists]
@@ -131,12 +141,18 @@ class Template(Book):
                     output_nb.cells.extend(content_blocks[block_name])
             else:
                 output_nb.cells.append(cell)
+        output_nb.template = self
         return output_nb
 
 
 class Knotbook(Book):
 
-    def get_applicable_template(self):
+    def __init__(self, path=None):
+        super().__init__(path)
+        self.template = None
+        self.title = None
+
+    def get_template_name(self):
         """Determines which template should be used.
 
         Returns:
@@ -208,5 +224,30 @@ class Knotbook(Book):
         rel_link = os.path.relpath(self.path, from_folder)
         rel_link_posix = pathlib.Path(rel_link).as_posix()
         return rel_link_posix
+
+    def number_headers(self, outline_format):
+        if self.ptn_outline is None:
+                    self.ptn_outline = re.compile(
+                        r"^(#{2,5})\s(?=[^{]{2})",
+                        re.MULTILINE)
+        counter = utils.get_counter(outline_format)
+        current = [1 for count in counter]
+        for cell in self.markdown_cells:
+            lines = cell["source"].split("\n")
+            for line_num, line in enumerate(lines):
+                match = self.ptn_outline.search(line)
+                if match is not None:
+                    level = len(match.group(1))
+                    numbered_header = (
+                        match.group(1) + " " + 
+                        counter[level-1](current[level-1]) + ". ")
+                    current[level-1] += 1
+                    current[level:] = [1] * (len(current) - level)
+                    numbered_line = self.ptn_outline.sub(numbered_header, line)
+                    lines[line_num] = numbered_line
+            cell["source"] = "\n".join(lines)
+
+
+
 
 

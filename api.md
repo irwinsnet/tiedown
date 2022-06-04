@@ -45,4 +45,39 @@ It will ignore H1 headings that appear in the template file.
 ```{% toc_exclude %}```
 * Exclude from Table of Contents
 
+```{{ toc }}```
+Insert table of contents at this location.
+
+## Section Numbering
+Section numbering parameters will be defined in the template, so that
+all documents that use the same template will have the same numbering
+scheme. The available sequences will be:
+* I: Uppercase Roman numerals
+* i: Lowercase Roman numerals
+* 1: Integers
+* A: Uppercase letters
+* a: Lowercase letters
+
+```{% outline I.A.1.a %}```
+Outline numbering will be defined as a string. For example, "I.A.1.a" will
+cause the H2 headers to use uppercase Roman numerals, H3 headers to use
+Uppercase letters, etc. (H1 headers are only used for the page title.)
+All numbers will be separated with a period.
+
+If the `{% outline ... %}` command is omitted from the template, there
+will be no automatic section numbering.
+
+If the `{% outline ... %}` is present in the knotbook, it will override
+the template's `{% outline ... %}` command. Teh command `{% outline None %}`
+in a content book will prevent section numbers from being added to the
+notebook.
+
+To skip a header, place {% skip %} in front of the header text.
+
+## Variables
+Variables can't use the following reserved names:
+* `toc`
+* `skip`
+* `rel_link`
+
 

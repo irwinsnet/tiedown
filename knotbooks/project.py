@@ -1,4 +1,3 @@
-import os.path
 import pathlib
 import re
 import shutil
@@ -26,49 +25,76 @@ class KBProject:
         self.output_path = None
         self.links = {}
         self.toc = []
+        self.ignored_files_on_copy = []
 
         self.ptn_insert = re.compile(r"{{\s*rel_link\s+([^}\s]+)\s*}}",
                                      re.IGNORECASE)
+        self.ptn_toc = re.compile(r"{{\s*toc\s*}}", re.IGNORECASE)
 
-    def get_folders(self, output=False):
+    def get_folders(self, path=None):
         """Gets list of subfolders in project folder.
 
         Args:
-            output: boolean. If True, iterates over output folders,
-                otherwise iterates over content folders. Optional.
-                Default is False (content folders).
-        Raises:
-            ValueError if self.output_path has not been defined.
+            path: Parent folder of returned folders as pathlib.Path
+                object.
         Returns:
-            List of pathlib.Path objects.
+            Sorted list of folders as pathlib.Path objects.
         """
-        path = self.output_path if output else self.content_path
-        if path is None:
-            raise ValueError("Output path has not yet been defined.")
+        path = self.content_path if path is None else self.output_path
         folders = list(path.iterdir())
         folders = [folder for folder in folders
                    if folder.is_dir() and folder.name != ".ipynb_checkpoints"]
         folders = [path] + sorted(folders, key=lambda x: x.name)
         return folders
 
-    def iter_notebooks(self, output=False):
+    def iter_notebooks(self, path=None):
         """Iterates over all notebooks in project.
 
         Args:
-            output: boolean. If True, iterates over output notebooks,
-                otherwise iterates over content notebooks. Optional.
-                Default is False (content notebooks).
+            path: Parent folder of returned Knotbooks. Pathlib.Path
+                object.
         Returns:
-            A dictionary with keys "nb", "path", "folder_index",
-            and "nb_index".
+            Knotbooks from the folder specified in path or its child
+            folders.
         """
         index = 0
-        for folder_idx, folder in enumerate(self.get_folders(output)):
+        for folder in self.get_folders(path):
             nb_paths = list(folder.glob(f"{self.notebook_prefix}*.ipynb"))
             sorted_nbpaths = sorted(nb_paths, key=lambda x: x.name)
-            for path_idx, path in enumerate(sorted_nbpaths):
+            for path in sorted_nbpaths:
                 yield book.Knotbook(path)
                 index += 1
+
+#region FIRST PASS #####################################################
+#     Tiedown conducts two different passes over the project files.
+# The methods in this section are used for the first pass.
+########################################################################
+
+    def first_pass(self, output_path=None):
+        """Builds output notebooks from content files.
+        
+        The following actions occur during the first pass:
+        * All files in the output folder are erased and a new output
+          folder is created.
+        * Each content notebook is combined with a template to create
+          a new output notebook.
+        * Each notebook is scanned for relative links and TOC entries.
+        * Sections are numbered.
+        * Output notebooks are saved to disk in the output folder.
+        * Copies other top-level files and folders in the content folder.
+
+        Args:
+            output_path: Optional. The name of the output folder as
+              a string. Defaults to "output". 
+        """
+        self.output_path = self._create_output_folder(output_path)
+        for nb in self._iter_output_notebooks():
+            cmds = nb.get_commands(0)  # Get page-level commands
+            self._append_links(nb, cmds)
+            self._append_toc_entries(nb, cmds)
+            nb = self._add_section_numbers(nb, cmds)
+            nb.write()
+        self._copy_other_files()
 
     def _create_output_folder(self, output_path=None):
         """Creates a folder at output_path"""
@@ -80,78 +106,115 @@ class KBProject:
         output_path.mkdir()
         return output_path
 
-    def get_template(self, template_name=""):
-        """Retrieves the main template."""
-        if template_name == "":
-            template_name = self.default_template
-        return book.Template(self.template_folder_path / template_name)      
-
-    def first_pass(self, output_path=None):
-        self.output_path = self._create_output_folder(output_path)
-
+    def _iter_output_notebooks(self):
         subfolder = None
         for kb in self.iter_notebooks():
-            # Get each knotbook and its output location
-            if kb.path != subfolder:
-                # Check for knotbooks in top-level folder
-                if kb.path.parent == self.content_path:
-                    subfolder = self.output_path
-                # Process knotbooks in subfolders
-                else:
-                    subfolder = self.output_path / kb.path.parts[-2]
-                    subfolder.mkdir()
-            # Create new notebook from knotbook and template
-            template_name = kb.get_applicable_template()
-            if template_name is not None:
-                template = self.get_template(template_name)
-                nb = template.embed_knotbook(kb)
+            subfolder = self._update_subfolder(subfolder, kb)
+            yield self._create_output_notebook(subfolder, kb)
+
+    def _update_subfolder(self, subfolder, kb):
+        if kb.path != subfolder:
+            # Check for knotbooks in top-level folder
+            if kb.path.parent == self.content_path:
+                subfolder = self.output_path
+            # Process knotbooks in subfolders
             else:
-                nb = kb
+                subfolder = self.output_path / kb.path.parts[-2]
+                self._copy_subfolder_contents(kb.path.parent, subfolder)
+                # subfolder.mkdir()
+        return subfolder
 
-            nb.path = subfolder / kb.path.parts[-1]
+    def _create_output_notebook(self, subfolder, kb):
+        template_name = kb.get_template_name()
+        if template_name is not None:
+            template = self._get_template(template_name)
+            nb = template.embed_knotbook(kb)
+        else:
+            nb = kb
+        nb.path = subfolder / kb.path.parts[-1]
+        nb.title = kb.get_title()
+        return nb
 
-            # Process page-level commands
-            cmds = nb.get_commands(0)
-            if "target" in cmds:
-                self.links[cmds["target"][0]] = nb
-            if "toc_exclude" not in cmds:
-                if "toc_entry" in cmds:
-                    toc_entry = " ".join(cmds["toc_entry"])
-                else:
-                    toc_entry = kb.get_title()
-                if toc_entry is not None:
-                    self.toc.append((toc_entry, nb.path))
+    def _get_template(self, template_name=""):
+        """Retrieves a template file."""
+        if template_name == "":
+            template_name = self.default_template
+        return book.Template(self.template_folder_path / template_name)
 
+    def _append_links(self, nb, cmds):
+        if "target" in cmds:
+            self.links[cmds["target"][0]] = nb
 
-            # Write notebook to output folder
-            nbformat.write(nb.book, nb.path, 4)
+    def _append_toc_entries(self, nb, cmds):
+        if "toc_exclude" not in cmds:
+            if "toc_entry" in cmds:
+                toc_entry = " ".join(cmds["toc_entry"])
+            else:
+                toc_entry = nb.title
+            if toc_entry is not None:
+                self.toc.append((toc_entry, nb))
 
-    def write_toc(self, relative_to=None):
-        if relative_to is None:
-            relative_to = self.output_path
+    def _copy_subfolder_contents(self, subfolder, output):
+        ignored = self.ignored_files_on_copy
+        ignored.extend([".ipynb_checkpoints", ".ipynb"])
+        shutil.copytree(
+            subfolder, output, ignore=shutil.ignore_patterns(*ignored))
+
+    def _add_section_numbers(self, nb, cmds):
+        if "outline" in cmds:
+            if cmds["outline"] != "None":
+                nb.number_headers(cmds["outline"][0])
+        elif nb.template is not None:
+            tcmds = nb.template.get_commands(0)
+            if "outline" in tcmds and tcmds["outline"][0] != "None":
+                nb.number_headers(tcmds["outline"][0])
+        return nb
+
+    def _copy_other_files(self):
+        """Copy top-level content files and folders without notebooks."""
+        for content_item in self.content_path.iterdir():
+            output_item = self.output_path / content_item.name
+            if output_item.exists():
+                continue
+            if content_item.is_dir() and content_item != ".ipynb_checkpoints":
+                self._copy_subfolder_contents(content_item, output_item)
+            else:
+                shutil.copy(content_item, output_item)
+        
+#endregion
+
+#region SECOND PASS ####################################################
+#     The second pass is conducted over the notebooks in the output
+# folder.
+########################################################################
+
+    def write_toc(self, nb):
         toc = []
+        entry_num = 1
         for entry in self.toc:
-            toc_line = f"[{entry[0]}]({entry[1]})"
-
+            text = entry[0]
+            link = entry[1].rel_link_to(nb)
+            toc.append(f"{entry_num}. [{text}]({link})")
+            entry_num += 1
+        return "\n".join(toc)
 
     def parse_inserts(self, cell, nb):
         def _make_link(match):
             tgt_nb = self.links[match.group(1)]
             return "(" + tgt_nb.rel_link_to(nb) + ")"
-        return self.ptn_insert.sub(_make_link, cell["source"])
+        parsed =  self.ptn_insert.sub(_make_link, cell["source"])
+
+        def _make_toc(match):
+            return self.write_toc(nb)
+        parsed = self.ptn_toc.sub(_make_toc, parsed)
+
+        return parsed
 
     def second_pass(self):
-        for nb in self.iter_notebooks(output=True):
+        for nb in self.iter_notebooks(self.output_path):
             for cell in nb.cells:
                cell["source"] = self.parse_inserts(cell, nb)
             nbformat.write(nb.book, nb.path, 4)
 
 
-        
-
-           
-
-    
-
-
-
+#endregion   
