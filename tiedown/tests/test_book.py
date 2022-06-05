@@ -13,19 +13,19 @@ import tiedown.utils as utils
 @pytest.fixture
 def book1():
     path = pathlib.Path.cwd() / "test_project" / "content" / "a" / "01.ipynb"
-    return tiedown.book.Knotbook(path)
+    return tiedown.book.NoteBook(path)
 
 
 @pytest.fixture
 def book2():
     path = pathlib.Path.cwd() / "test_project" / "content" / "x" / "02.ipynb"
-    return tiedown.book.Knotbook(path)
+    return tiedown.book.NoteBook(path)
 
 
 @pytest.fixture
 def toc():
     path = pathlib.Path.cwd() / "test_project" / "content" / "TOC.ipynb"
-    return tiedown.book.Knotbook(path) 
+    return tiedown.book.NoteBook(path) 
 
 
 @pytest.fixture
@@ -35,12 +35,12 @@ def template():
 
 
 def test_folder():
-    assert pathlib.Path.cwd().name == "knotbook"
+    assert pathlib.Path.cwd().name == "tiedown"
 
 
-def test_knotbook(book1):
-    assert len(book1) == 10
-    assert book1[0]["source"] == "{% target lesson_1 %}"
+def test_tiedown(book1):
+    assert len(book1) == 9
+    assert book1[0]["source"] == "target: lesson_1"
 
 
 def test_get_applicable_template(book1, book2, toc):
@@ -62,7 +62,7 @@ def test_get_titles(book1, book2, toc):
     assert book1.get_title() == "This is the title of Chapter 1"
     assert book2.get_title() is None
     toc_entry = book2.get_commands(0)["toc_entry"]
-    assert " ".join(toc_entry) == "This is the title of Chapter 2"
+    assert toc_entry == "This is the title of Chapter 2"
     assert toc.get_title() is None
 
 

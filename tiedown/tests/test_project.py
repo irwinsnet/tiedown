@@ -22,43 +22,37 @@ def project_passed1(tdproject):
     return project_first_pass
     
 
-def test_get_inserts(template):
-    assert template.get_inserts() == [{'tag': 'content', 'cell_idx': 2},
-                                      {'tag': 'other_stuff', 'cell_idx': 4}]
-
-
 def test_iter_notebook_paths(tdproject):
     books = list(tdproject.iter_notebooks())
     assert len(books) == 3
     assert len(books[0]) == 4
-    assert isinstance(books[0], tiedown.book.Knotbook)
+    assert isinstance(books[0], tiedown.book.NoteBook)
     nb1_path = pathlib.Path(r"content/a/01.ipynb")
     assert books[1].path.relative_to(tdproject.project_path) == nb1_path
 
 
 def test_commands():
-    kbook = tiedown.book.Book()
+    cbook = tiedown.book.Book()
 
-    cell_source = r"{% insert content %}"
-    kbook.cells.append(kbook.new_markdown(
-       source=cell_source))
-    cmd = kbook.get_commands(0)
+    cell_source = r"insert: content"
+    cbook.cells.append(cbook.new_raw(source=cell_source))
+    cmd = cbook.get_commands(0)
     assert "insert" in cmd
-    assert cmd["insert"] == ["content"]
+    assert cmd["insert"] == "content"
 
-    kbook.cells.append(kbook.new_markdown())
-    assert not kbook.get_commands(kbook[1])
+    cbook.cells.append(cbook.new_raw())
+    assert not cbook.get_commands(cbook[1])
 
-    kbook.cells[1]["source"] = r"{% endblock %}"
-    command = kbook.get_commands(1)
+    cbook.cells[1]["source"] = r"endblock: "
+    command = cbook.get_commands(1)
     assert "endblock" in command
-    assert command["endblock"] == []
+    assert command["endblock"] == None
 
-    cell_source = r"{% multi-args 1 two %}"
-    kbook.cells.append(kbook.new_markdown(source=cell_source))
-    commands = kbook.get_commands(2)
+    cell_source = r"multi-args: [1, two]"
+    cbook.cells.append(cbook.new_raw(source=cell_source))
+    commands = cbook.get_commands(2)
     assert "multi-args" in commands
-    assert commands["multi-args"] == ["1", "two"]
+    assert commands["multi-args"] == [1, "two"]
 
 
 def test_get_blocks(tdproject):

@@ -5,6 +5,7 @@ import pathlib
 import re
 
 import nbformat
+import yaml
 
 import tiedown.utils as utils
 
@@ -33,15 +34,15 @@ class Book:
         return getattr(self.book, name)
 
     @property
-    def markdown_cells(self):
-        return [cell for cell in self.cells if cell["cell_type"] == "markdown"]
+    def raw_cells(self):
+        return [cell for cell in self.cells if cell["cell_type"] == "raw"]
 
     @staticmethod
-    def new_markdown(source=None):
+    def new_raw(source=None):
         if source is None:
-            return nbformat.v4.new_markdown_cell()
+            return nbformat.v4.new_raw_cell()
         else:
-            return nbformat.v4.new_markdown_cell(source=source)
+            return nbformat.v4.new_raw_cell(source=source)
 
     @staticmethod
     def new_code(source=None):
@@ -56,7 +57,7 @@ class Book:
         nbformat.write(self.book, path, 4)
 
 
-    def get_commands(self, cell, as_dict=True):
+    def get_commands_old(self, cell, as_dict=True):
         """Extracts all commands from a cell.
 
         Args:
@@ -85,6 +86,14 @@ class Book:
             commands = {cmd["command"]: cmd["args"] for cmd in commands}
         return commands
 
+    def get_commands(self, cell):
+        if isinstance(cell, int):
+            cell = self.cells[cell]
+        if cell["cell_type"] == "raw":
+            return yaml.load(cell["source"], Loader=yaml.FullLoader)
+        else:
+            return {}
+
 
 class Template(Book):
     def get_inserts(self):
@@ -99,10 +108,10 @@ class Template(Book):
         for cell_idx, cell in enumerate(self.book.cells):
             cmds = self.get_commands(cell)
             if "insert" in cmds:
-                inserts.append({"tag": cmds["insert"][0], "cell_idx": cell_idx})
+                inserts.append({"tag": cmds["insert"], "cell_idx": cell_idx})
         return inserts
 
-    def embed_knotbook(self, kb):
+    def embed_knotbook(self, cbook):
         """Embeds content from a kntobook into a template.
 
         Args:
@@ -113,18 +122,18 @@ class Template(Book):
             and the content Knotbook.
         """
         # Create new output notebook
-        output_nb = Knotbook()
+        output_nb = NoteBook()
         if "kernelspec" in self.metadata:
             output_nb.metadata["kernelspec"] = self.metadata["kernelspec"]
         
         # Merge content from template and Knotbook
-        content_blocks = kb.get_blocks()            
+        content_blocks = cbook.get_blocks()            
         if Enums.KB_PAGE_COMMANDS in content_blocks:
             output_nb.cells.append(content_blocks[Enums.KB_PAGE_COMMANDS][0])
         for cell in self.cells:
-            commands = kb.get_commands(cell)
+            commands = cbook.get_commands(cell)
             if "insert" in commands:
-                block_name = commands["insert"][0]
+                block_name = commands["insert"]
                 if block_name in content_blocks:
                     output_nb.cells.extend(content_blocks[block_name])
             else:
@@ -133,7 +142,7 @@ class Template(Book):
         return output_nb
 
 
-class Knotbook(Book):
+class NoteBook(Book):
 
     def __init__(self, path=None):
         super().__init__(path)
@@ -153,10 +162,10 @@ class Knotbook(Book):
         # Check for {% template ... %} command
         cmds = self.get_commands(0)
         if "template" in cmds:
-            if cmds["template"][0] == "None":
+            if cmds["template"] == "None":
                 template = None
             else:
-                template = cmds["template"][0] + ".ipynb"
+                template = cmds["template"] + ".ipynb"
         return template
 
     def get_blocks(self):
@@ -181,7 +190,7 @@ class Knotbook(Book):
             if not in_block:
                 if "block" in commands:
                     in_block = True
-                    block_name = commands["block"][0]
+                    block_name = commands["block"]
                     blocks[block_name] = []
             else:
                 if "endblock" in commands:
@@ -220,7 +229,7 @@ class Knotbook(Book):
                         re.MULTILINE)
         counter = utils.get_counter(outline_format)
         current = [1 for count in counter]
-        for cell in self.markdown_cells:
+        for cell in self.raw_cells:
             lines = cell["source"].split("\n")
             for line_num, line in enumerate(lines):
                 match = self.ptn_outline.search(line)
@@ -235,16 +244,9 @@ class Knotbook(Book):
                     lines[line_num] = numbered_line
             cell["source"] = "\n".join(lines)
 
-    def is_command_cell(self, cell):
-        cmd_cell_ptn = re.compile(r"(\s*{%\s[^%]+\s%}\s*)+")
-        match = cmd_cell_ptn.fullmatch(cell["source"])
-        return (match is not None)
-
-    def remove_command_cells(self):
-        cells = self.cells
-        filtered_cells = [cell for cell in self.cells if not self.is_command_cell(cell)]
-        self.book.cells = filtered_cells
-        # self.cells = list(filter(self.is_command_cell, self.cells))
+    def remove_raw_cells(self):
+        self.book.cells = list(
+            filter(lambda x: x["cell_type"] != "raw", self.cells))
 
 
 

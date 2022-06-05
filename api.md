@@ -80,4 +80,7 @@ Variables can't use the following reserved names:
 * `skip`
 * `rel_link`
 
+Define variables in top command cell.
+`{% define mod_date 2022-06-04 }`
+
 

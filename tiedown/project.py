@@ -62,7 +62,7 @@ class TdProject:
             nb_paths = list(folder.glob(f"{self.notebook_prefix}*.ipynb"))
             sorted_nbpaths = sorted(nb_paths, key=lambda x: x.name)
             for path in sorted_nbpaths:
-                yield book.Knotbook(path)
+                yield book.NoteBook(path)
                 index += 1
 
 #region FIRST PASS #####################################################
@@ -143,12 +143,12 @@ class TdProject:
 
     def _append_links(self, obook, cmds):
         if "target" in cmds:
-            self.links[cmds["target"][0]] = obook
+            self.links[cmds["target"]] = obook
 
     def _append_toc_entries(self, obook, cmds):
         if "toc_exclude" not in cmds:
             if "toc_entry" in cmds:
-                toc_entry = " ".join(cmds["toc_entry"])
+                toc_entry = cmds["toc_entry"]
             else:
                 toc_entry = obook.title
             if toc_entry is not None:
@@ -163,11 +163,11 @@ class TdProject:
     def _add_section_numbers(self, obook, cmds):
         if "outline" in cmds:
             if cmds["outline"] != "None":
-                obook.number_headers(cmds["outline"][0])
+                obook.number_headers(cmds["outline"])
         elif obook.template is not None:
             tcmds = obook.template.get_commands(0)
-            if "outline" in tcmds and tcmds["outline"][0] != "None":
-                obook.number_headers(tcmds["outline"][0])
+            if "outline" in tcmds and tcmds["outline"] != "None":
+                obook.number_headers(tcmds["outline"])
         return obook
 
     def _copy_other_files(self):
