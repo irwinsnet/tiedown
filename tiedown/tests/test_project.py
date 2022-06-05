@@ -1,27 +1,23 @@
 import copy
-import os
 import pathlib
-import shutil
-
-import nbformat
 import pytest
 
-import knotbooks.project
-import knotbooks.book
+import tiedown.project
+import tiedown.book
 
 
 @pytest.fixture
-def kbproject():
-    return knotbooks.project.KBProject("test_project")
+def tdproject():
+    return tiedown.project.TdProject("test_project")
 
 
 @pytest.fixture
-def template(kbproject):
-    return kbproject.get_template()
+def template(tdproject):
+    return tdproject._get_template()
 
 @pytest.fixture
-def project_passed1(kbproject):
-    project_first_pass = copy.deepcopy(kbproject)
+def project_passed1(tdproject):
+    project_first_pass = copy.deepcopy(tdproject)
     project_first_pass.first_pass()
     return project_first_pass
     
@@ -31,17 +27,17 @@ def test_get_inserts(template):
                                       {'tag': 'other_stuff', 'cell_idx': 4}]
 
 
-def test_iter_notebook_paths(kbproject):
-    books = list(kbproject.iter_notebooks())
+def test_iter_notebook_paths(tdproject):
+    books = list(tdproject.iter_notebooks())
     assert len(books) == 3
     assert len(books[0]) == 4
-    assert isinstance(books[0], knotbooks.book.Knotbook)
+    assert isinstance(books[0], tiedown.book.Knotbook)
     nb1_path = pathlib.Path(r"content/a/01.ipynb")
-    assert books[1].path.relative_to(kbproject.project_path) == nb1_path
+    assert books[1].path.relative_to(tdproject.project_path) == nb1_path
 
 
 def test_commands():
-    kbook = knotbooks.book.Book()
+    kbook = tiedown.book.Book()
 
     cell_source = r"{% insert content %}"
     kbook.cells.append(kbook.new_markdown(
@@ -65,11 +61,11 @@ def test_commands():
     assert commands["multi-args"] == ["1", "two"]
 
 
-def test_get_blocks(kbproject):
-    books = list(kbproject.iter_notebooks())
+def test_get_blocks(tdproject):
+    books = list(tdproject.iter_notebooks())
     blocks = books[1].get_blocks()
     assert len(blocks.keys()) == 3
-    assert knotbooks.book.Enums.KB_PAGE_COMMANDS in blocks
+    assert tiedown.book.Enums.KB_PAGE_COMMANDS in blocks
     assert len(blocks["content"]) == 3
     assert len(blocks["other_stuff"]) == 1
 

@@ -6,7 +6,7 @@ import re
 
 import nbformat
 
-import knotbooks.utils as utils
+import tiedown.utils as utils
 
 class Enums(enum.Enum):
     KB_PAGE_COMMANDS = 0
@@ -28,25 +28,13 @@ class Book:
     def __len__(self):
         return len(self.cells)
 
-    @property
-    def cells(self):
-        return self.book.cells
+    def __getattr__(self, name):
+        """Provide nbformat object attributes."""
+        return getattr(self.book, name)
 
     @property
     def markdown_cells(self):
         return [cell for cell in self.cells if cell["cell_type"] == "markdown"]
-
-    @property
-    def metadata(self):
-        return self.book.metadata
-
-    @property
-    def nbformat(self):
-        return self.book.nbformat
-
-    @property
-    def nbformat_minor(self):
-        return self.book.nbformat_minor
 
     @staticmethod
     def new_markdown(source=None):
@@ -83,7 +71,7 @@ class Book:
         {"template": [None], "link": ["page_1"]}
         """
         if self.ptn_command is None:
-            self.ptn_command = re.compile(r"{%\s+(.+)\s+%}")
+            self.ptn_command = re.compile(r"{%\s([^%]+)\s%}")
         if isinstance(cell, int):
             cell = self.cells[cell]
         if cell["cell_type"] == "markdown":
@@ -246,6 +234,19 @@ class Knotbook(Book):
                     numbered_line = self.ptn_outline.sub(numbered_header, line)
                     lines[line_num] = numbered_line
             cell["source"] = "\n".join(lines)
+
+    def is_command_cell(self, cell):
+        cmd_cell_ptn = re.compile(r"(\s*{%\s[^%]+\s%}\s*)+")
+        match = cmd_cell_ptn.fullmatch(cell["source"])
+        return (match is not None)
+
+    def remove_command_cells(self):
+        cells = self.cells
+        filtered_cells = [cell for cell in self.cells if not self.is_command_cell(cell)]
+        self.book.cells = filtered_cells
+        # self.cells = list(filter(self.is_command_cell, self.cells))
+
+
 
 
 
