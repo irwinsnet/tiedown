@@ -61,7 +61,7 @@ def test_get_blocks(tdproject):
     assert len(blocks.keys()) == 3
     assert tiedown.book.Enums.KB_PAGE_COMMANDS in blocks
     assert len(blocks["content"]) == 3
-    assert len(blocks["other_stuff"]) == 1
+    assert len(blocks["other_stuff"]) == 2
 
 def test_inserts(project_passed1):
     notebooks = list(

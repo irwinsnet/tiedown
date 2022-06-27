@@ -20,7 +20,6 @@ class Book:
         else:
             self.book = nbformat.read(path, 4)
         self.path = path
-        self.ptn_command = None
         self.ptn_outline = None
 
     def __getitem__(self, idx):
@@ -35,7 +34,13 @@ class Book:
 
     @property
     def raw_cells(self):
-        return [cell for cell in self.cells if cell["cell_type"] == "raw"]
+        return [cell for cell in self.cells
+                if cell["cell_type"] == "raw"]
+
+    @property
+    def md_cells(self):
+        return [cell for cell in self.cells
+                if cell["cell_type"] == "markdown"]
 
     @staticmethod
     def new_raw(source=None):
@@ -55,36 +60,6 @@ class Book:
         if path is None:
             path = self.path
         nbformat.write(self.book, path, 4)
-
-
-    def get_commands_old(self, cell, as_dict=True):
-        """Extracts all commands from a cell.
-
-        Args:
-            cell: A nbformat cell string the cell index value.
-
-        Returns a list of command dictionaries, or an empty list if the
-        cell contains no commands. For example:
-        [{"command": "template", "args": [None]},
-         {"command": "link", "args": ["page_1"]}]
-
-        Or if as_dict is True:
-        {"template": [None], "link": ["page_1"]}
-        """
-        if self.ptn_command is None:
-            self.ptn_command = re.compile(r"{%\s([^%]+)\s%}")
-        if isinstance(cell, int):
-            cell = self.cells[cell]
-        if cell["cell_type"] == "markdown":
-            cmd_strings = self.ptn_command.findall(cell["source"])
-            token_lists = [cmd_string.split() for cmd_string in cmd_strings]
-            commands = [{"command": tokens[0].lower(), "args": tokens[1:]}
-                        for tokens in token_lists]
-        else:
-            commands = []
-        if as_dict:
-            commands = {cmd["command"]: cmd["args"] for cmd in commands}
-        return commands
 
     def get_commands(self, cell):
         if isinstance(cell, int):
@@ -210,14 +185,19 @@ class NoteBook(Book):
                     return match.group(1)
         return None
 
-    def rel_link_to(self, from_nb):
+    def rel_link_to(self, from_path=None):
         """Returns relative link (POSIX) to notebook from another notebook.
         
         Args:
             from_path: A pathlib.Path object from which the relative
-            path will be determined.        
+                path will be determined.
+
+        Returns: A relative HTML link, suitable for including in
+            an <a> tag's href element or in a Markdown link.
         """
-        from_folder = from_nb.path.parent.as_posix()
+        if isinstance(from_path, Book):
+            from_path = from_path.path
+        from_folder = from_path.parent.as_posix()
         rel_link = os.path.relpath(self.path, from_folder)
         rel_link_posix = pathlib.Path(rel_link).as_posix()
         return rel_link_posix
@@ -229,7 +209,7 @@ class NoteBook(Book):
                         re.MULTILINE)
         counter = utils.get_counter(outline_format)
         current = [1 for count in counter]
-        for cell in self.raw_cells:
+        for cell in self.md_cells:
             lines = cell["source"].split("\n")
             for line_num, line in enumerate(lines):
                 match = self.ptn_outline.search(line)
@@ -243,6 +223,15 @@ class NoteBook(Book):
                     numbered_line = self.ptn_outline.sub(numbered_header, line)
                     lines[line_num] = numbered_line
             cell["source"] = "\n".join(lines)
+
+    def add_cell_ids(self):
+        """Adds a <span> element with a unique ID to each markdown cell."""
+        cell_index = 1
+        for cell in self.md_cells:
+            cell["metadata"][utils.Keys.td_cell_index.value] = f"cid{cell_index}"
+            cell_span = f'<span id="cid{cell_index}"/>\n'
+            cell["source"] = cell_span + "\n" + cell["source"]
+            cell_index += 1
 
     def remove_raw_cells(self):
         self.book.cells = list(

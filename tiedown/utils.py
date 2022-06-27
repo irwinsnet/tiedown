@@ -1,5 +1,19 @@
+import enum
 import math
 import string
+
+class Keys(enum.Enum):
+    nb_markdown = "markdown"
+    nb_metadata = "metadata"
+    nb_raw = "raw"
+    nb_source = "source"
+    td_cell_index = "tiedown.cell_index"
+
+class Commands(enum.Enum):
+    index = "index"
+    target = "target"
+    toc_entry = "toc_entry"
+    toc_exclude = "toc_exclude"
 
 
 def roman_from_int(number, lower=False):

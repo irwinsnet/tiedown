@@ -29,10 +29,16 @@ The commend cell will be replaced with the block named `<block_name>`.
 ```{{ rel_link <page_name> }}```
 * Used in content or template file.
 * Creates internal hyperlink to notebook with corresponding target command.
+* Place link text in square brackets before rel_link command. Example:
+  `[This page contains cool stuff.]{{rel_link: page-with-cool-stuff}}`
 
 ```{% target <page_name> %}```
 * Used in content file.
 * Should be placed in first cell of notebook.
+
+```{{ id: section_id}}```
+* Used in content or template file
+* Creates a `<span>` tag with the specified id attribute.
 
 ## Table of Contents (TOC)
 ```{% toc_entry <toc_entry>%}```
