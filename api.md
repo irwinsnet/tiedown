@@ -74,11 +74,14 @@ If the `{% outline ... %}` command is omitted from the template, there
 will be no automatic section numbering.
 
 If the `{% outline ... %}` is present in the knotbook, it will override
-the template's `{% outline ... %}` command. Teh command `{% outline None %}`
+the template's `{% outline ... %}` command. The command `{% outline None %}`
 in a content book will prevent section numbers from being added to the
 notebook.
 
 To skip a header, place {% skip %} in front of the header text.
+
+To place the outline number somewhere other than the beginning of the
+line, place {{number}} at the desired location.
 
 ## Variables
 Variables can't use the following reserved names:

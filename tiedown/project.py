@@ -1,6 +1,7 @@
 import pathlib
 import re
 import shutil
+import string
 
 import yaml
 
@@ -90,18 +91,24 @@ class TdProject:
         """
         self.output_path = self._create_output_folder(output_path)
         for obook in self._iter_output_notebooks():
-            cmds = obook.get_commands(0)  # Get page-level commands
-            self._append_page_links(obook, cmds)
-            self._append_toc_entries(obook, cmds)
-            obook = self._add_section_numbers(obook, cmds)
-            obook.add_cell_ids()
+            obook.add_cell_ids()            
+            self._append_page_links(obook)
+            self._append_toc_entries(obook)
+            self._add_section_numbers(obook)
             self._append_index_entries(obook)
             obook.remove_raw_cells()
             obook.write()
         self._copy_other_files()
 
     def _create_output_folder(self, output_path=None):
-        """Creates a folder at output_path"""
+        """Creates a folder at output_path.
+        
+        Args:
+            output_path: str or pathlib path. Path to project's output
+                folder.
+        
+        Returns: Pathlib path to the output folder.
+        """
         if output_path is None:
             output_path = "output"
         output_path = self.project_path / output_path
@@ -111,12 +118,18 @@ class TdProject:
         return output_path
 
     def _iter_output_notebooks(self):
+        """Iterator for output notebooks.
+        
+        Creates and yields a new output notebook for each content
+        notebook.
+        """
         subfolder = None
         for cbook in self.iter_notebooks():
-            subfolder = self._update_subfolder(subfolder, cbook)
+            subfolder = self._copy_folder_contents(subfolder, cbook)
             yield self._create_output_notebook(subfolder, cbook)
 
-    def _update_subfolder(self, subfolder, cbook):
+    def _copy_folder_contents(self, subfolder, cbook):
+        """Copies folder contents to the output folder."""
         if cbook.path != subfolder:
             # Check for knotbooks in top-level folder
             if cbook.path.parent == self.content_path:
@@ -129,6 +142,7 @@ class TdProject:
         return subfolder
 
     def _create_output_notebook(self, subfolder, cbook):
+        """Creates an output notebook."""
         template_name = cbook.get_template_name()
         if template_name is not None:
             template = self._get_template(template_name)
@@ -145,11 +159,15 @@ class TdProject:
             template_name = self.default_template
         return book.Template(self.template_folder_path / template_name)
 
-    def _append_page_links(self, obook, cmds):
+    def _append_page_links(self, obook):
+        """Adds page link to project links table."""
+        cmds = obook.get_commands(0)
         if "target" in cmds:
             self.links[cmds["target"]] = obook
 
-    def _append_toc_entries(self, obook, cmds):
+    def _append_toc_entries(self, obook):
+        """Adds TOC entry to project toc table."""
+        cmds = obook.get_commands(0)
         if "toc_exclude" not in cmds:
             if "toc_entry" in cmds:
                 toc_entry = cmds["toc_entry"]
@@ -159,6 +177,7 @@ class TdProject:
                 self.toc.append((toc_entry, obook))
 
     def _append_index_entries(self, obook):
+        """Appends index entries to project index table."""
         def _add_index(match):
             cmd = yaml.load(match.group(1), Loader=yaml.FullLoader)
             if "index" in cmd:
@@ -195,7 +214,9 @@ class TdProject:
         shutil.copytree(
             subfolder, output, ignore=shutil.ignore_patterns(*ignored))
 
-    def _add_section_numbers(self, obook, cmds):
+    def _add_section_numbers(self, obook):
+        """Adds section numbers to each output notebook."""
+        cmds = obook.get_commands(0)
         if "outline" in cmds:
             if cmds["outline"] != "None":
                 obook.number_headers(cmds["outline"])
@@ -203,7 +224,7 @@ class TdProject:
             tcmds = obook.template.get_commands(0)
             if "outline" in tcmds and tcmds["outline"] != "None":
                 obook.number_headers(tcmds["outline"])
-        return obook
+        # return obook
 
     def _copy_other_files(self):
         """Copy top-level content files and folders without notebooks."""
@@ -224,13 +245,20 @@ class TdProject:
 ########################################################################
 
     def second_pass(self):
+        """Passes over all output notebooks again for finalization.
+        * Adds TOC and/or index.
+        * Removes raw cells.
+        * Removes cell outputs.
+        """
         for obook in self.iter_notebooks(self.output_path):
             for cell in obook.md_cells:
                cell["source"] = self.parse_inserts(cell, obook)
             obook.remove_raw_cells()
+            obook.remove_code_outputs()
             obook.write()
 
     def parse_inserts(self, cell, obook):
+        """Evalutes inline commands in output book."""
         def _replace(match):
             cmd = yaml.load(match.group(1), Loader=yaml.FullLoader)
             if "rel_link" in cmd:
@@ -242,8 +270,9 @@ class TdProject:
                 return "(" + rel_link + ")"
             elif "toc" in cmd:
                 return self.write_toc(obook)
-            elif "write_index" in cmd:
-                return self.write_index(obook)
+            elif "write_index_section" in cmd:
+                return self.write_index_section(cmd["write_index_section"],
+                                                obook)
             elif "skip" in cmd:
                 return ""
             elif "id" in cmd:
@@ -254,6 +283,13 @@ class TdProject:
         return self.ptn_insert.sub(_replace, cell["source"])
 
     def write_toc(self, obook):
+        """Writes Table of Contents (TOC).
+        
+        Args:
+            obook: Output notebook that will contain TOC.
+
+        Returns: TOC as HTML text.        
+        """
         toc = []
         entry_num = 1
         for entry in self.toc:
@@ -263,48 +299,60 @@ class TdProject:
             entry_num += 1
         return "\n".join(toc)
 
-    def write_index(self, index_path=None):
-        if index_path is None:
-            index_path = self.output_path
-        index = ["<table>"]
-        index_keys = sorted(list(self.index.keys()), key=lambda x: x[0].lower())
+    def get_index_section(self, section_range):
+        section = {}
+        for char in section_range:
+            if char.upper() in string.ascii_uppercase:
+                section.update({key: val for key, val in self.index.items()
+                                if key[0][0].upper() == char.upper()})
+            else:
+                section.update(
+                    {key: val for key, val in self.index.items()
+                     if key[0][0].upper() not in string.ascii_uppercase})
+        return section
+
+    def write_index_section(self, section_start, obook=None):
+        index_path = self.output_path if obook is None else obook.path
+        index_section = self.get_index_section(section_start)
+        index = ["| Term | Links | Term | Links |"]
+        index.append("| --- | --- | --- | --- |")
+        index_keys = sorted(list(index_section.keys()),
+                            key=lambda x: x[0].lower())
         if len(index_keys) % 2 == 1:
             index_keys.append(None)
         left_keys = index_keys[:len(index_keys)//2]
         right_keys = index_keys[len(index_keys)//2:]
         for left_key, right_key in zip(left_keys, right_keys):
-            index.append("<tr>")
-            index.append(self.get_index_cell_html(left_key, index_path))
-            index.append(self.get_index_cell_html(right_key, index_path))
-            index.append("</tr>")
-        index.append("</table>")
+            left_cells = self.get_index_cell_html(left_key, index_path)
+            right_cells = self.get_index_cell_html(right_key, index_path)
+            index.append(f" | {left_cells} | {right_cells} |")
         return "\n".join(index)
 
     def get_index_cell_html(self, key, index_path):
-        """Generates a section of an HTML table for an index entry.
+        """Generates a markdown table row.
 
         Args:
             key: A two-element tuple containing the index term and
                 either `None` or the term's modifier.
 
-        Returns a string containing two HTML <td> elements.        
+        Returns a string containing markdown table markup.        
         """
         if key is None:
-            return "<td></td><td></td>"
+            return " | "
         term, modifier = key
         if modifier is None:
             term = term.title()
         elif modifier == "code":
             term = f"`{term}`"
         html = []
-        html.append(f"<td>{term}</td><td>")
+        html.append(f"{term} |")
         for link in self.index[key]:
             link_text = link[0].get_title()
             if link_text is None:
                 link_text = link[0].path.name
-            link_href = f"{link[0].rel_link_to(index_path)}#{link[1]}"
-            html.append(f'<li><a href="{link_href}">{link_text}</a></li>')
-        html.append("</td>")
-        return "\n".join(html)
+            link_href = link[0].rel_link_to(index_path, link[1])
+            html.append(f'[{link_text}]({link_href})<br/>')
+        return " ".join(html)
+
 
 #endregion   

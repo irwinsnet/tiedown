@@ -42,6 +42,11 @@ class Book:
         return [cell for cell in self.cells
                 if cell["cell_type"] == "markdown"]
 
+    @property
+    def code_cells(self):
+        return [cell for cell in self.cells
+                if cell["cell_type"] == "code"]
+
     @staticmethod
     def new_raw(source=None):
         if source is None:
@@ -123,6 +128,7 @@ class NoteBook(Book):
         super().__init__(path)
         self.template = None
         self.title = None
+        self.links = []
 
     def get_template_name(self):
         """Determines which template should be used.
@@ -185,7 +191,7 @@ class NoteBook(Book):
                     return match.group(1)
         return None
 
-    def rel_link_to(self, from_path=None):
+    def rel_link_to(self, from_path=None, cell_id=None):
         """Returns relative link (POSIX) to notebook from another notebook.
         
         Args:
@@ -200,9 +206,12 @@ class NoteBook(Book):
         from_folder = from_path.parent.as_posix()
         rel_link = os.path.relpath(self.path, from_folder)
         rel_link_posix = pathlib.Path(rel_link).as_posix()
+        if cell_id is not None:
+            rel_link_posix = f"{rel_link_posix}#{cell_id}"
         return rel_link_posix
 
     def number_headers(self, outline_format):
+
         if self.ptn_outline is None:
                     self.ptn_outline = re.compile(
                         r"^(#{2,5})\s(?=[^{]{2})",
@@ -218,11 +227,11 @@ class NoteBook(Book):
                     numbered_header = (
                         match.group(1) + " " + 
                         counter[level-1](current[level-1]) + ". ")
+                    lines[line_num] = self.ptn_outline.sub(numbered_header, line)
                     current[level-1] += 1
                     current[level:] = [1] * (len(current) - level)
-                    numbered_line = self.ptn_outline.sub(numbered_header, line)
-                    lines[line_num] = numbered_line
             cell["source"] = "\n".join(lines)
+
 
     def add_cell_ids(self):
         """Adds a <span> element with a unique ID to each markdown cell."""
@@ -236,6 +245,11 @@ class NoteBook(Book):
     def remove_raw_cells(self):
         self.book.cells = list(
             filter(lambda x: x["cell_type"] != "raw", self.cells))
+
+    def remove_code_outputs(self):
+        for cell in self.code_cells:
+            cell["outputs"].clear()
+            cell["execution_count"] = None
 
 
 
