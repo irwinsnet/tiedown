@@ -2,13 +2,13 @@ import copy
 import pathlib
 import pytest
 
-import tiedown.project
-import tiedown.book
+import src.project
+import src.book
 
 
 @pytest.fixture
 def tdproject():
-    return tiedown.project.TdProject("test_project")
+    return src.project.Project("test_project")
 
 
 @pytest.fixture
@@ -26,31 +26,31 @@ def test_iter_notebook_paths(tdproject):
     books = list(tdproject.iter_notebooks())
     assert len(books) == 3
     assert len(books[0]) == 4
-    assert isinstance(books[0], tiedown.book.NoteBook)
+    assert isinstance(books[0], src.book.NoteBook)
     nb1_path = pathlib.Path(r"content/a/01.ipynb")
     assert books[1].path.relative_to(tdproject.project_path) == nb1_path
 
 
 def test_commands():
-    cbook = tiedown.book.Book()
+    cbook = src.book.Book()
 
     cell_source = r"insert: content"
     cbook.cells.append(cbook.new_raw(source=cell_source))
-    cmd = cbook.get_commands(0)
+    cmd = cbook.get_rawcell_commands(0)
     assert "insert" in cmd
     assert cmd["insert"] == "content"
 
     cbook.cells.append(cbook.new_raw())
-    assert not cbook.get_commands(cbook[1])
+    assert not cbook.get_rawcell_commands(cbook[1])
 
     cbook.cells[1]["source"] = r"endblock: "
-    command = cbook.get_commands(1)
+    command = cbook.get_rawcell_commands(1)
     assert "endblock" in command
     assert command["endblock"] == None
 
     cell_source = r"multi-args: [1, two]"
     cbook.cells.append(cbook.new_raw(source=cell_source))
-    commands = cbook.get_commands(2)
+    commands = cbook.get_rawcell_commands(2)
     assert "multi-args" in commands
     assert commands["multi-args"] == [1, "two"]
 
@@ -59,7 +59,7 @@ def test_get_blocks(tdproject):
     books = list(tdproject.iter_notebooks())
     blocks = books[1].get_blocks()
     assert len(blocks.keys()) == 3
-    assert tiedown.book.Enums.KB_PAGE_COMMANDS in blocks
+    assert src.book.Enums.KB_PAGE_COMMANDS in blocks
     assert len(blocks["content"]) == 3
     assert len(blocks["other_stuff"]) == 2
 

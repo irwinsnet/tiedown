@@ -7,7 +7,7 @@ import re
 import nbformat
 import yaml
 
-import tiedown.utils as utils
+import utils
 
 class Enums(enum.Enum):
     KB_PAGE_COMMANDS = 0
@@ -66,7 +66,7 @@ class Book:
             path = self.path
         nbformat.write(self.book, path, 4)
 
-    def get_commands(self, cell):
+    def get_rawcell_commands(self, cell):
         if isinstance(cell, int):
             cell = self.cells[cell]
         if cell["cell_type"] == "raw":
@@ -86,7 +86,7 @@ class Template(Book):
         """
         inserts = []
         for cell_idx, cell in enumerate(self.book.cells):
-            cmds = self.get_commands(cell)
+            cmds = self.get_rawcell_commands(cell)
             if "insert" in cmds:
                 inserts.append({"tag": cmds["insert"], "cell_idx": cell_idx})
         return inserts
@@ -111,7 +111,7 @@ class Template(Book):
         if Enums.KB_PAGE_COMMANDS in content_blocks:
             output_nb.cells.append(content_blocks[Enums.KB_PAGE_COMMANDS][0])
         for cell in self.cells:
-            commands = cbook.get_commands(cell)
+            commands = cbook.get_rawcell_commands(cell)
             if "insert" in commands:
                 block_name = commands["insert"]
                 if block_name in content_blocks:
@@ -141,7 +141,7 @@ class NoteBook(Book):
         """
         template = ""  # Case if no {% template ... %} command - use default.
         # Check for {% template ... %} command
-        cmds = self.get_commands(0)
+        cmds = self.get_rawcell_commands(0)
         if "template" in cmds:
             if cmds["template"] == "None":
                 template = None
@@ -161,13 +161,13 @@ class NoteBook(Book):
         included in the dictionary with key `Enums.KB_PAGE_COMMANDS`.
         """
         blocks = {}
-        if self.get_commands(0):
+        if self.get_rawcell_commands(0):
             blocks[Enums.KB_PAGE_COMMANDS] = [self[0]]
 
         in_block = False
         block_name = None
         for cell in self.book.cells:
-            commands = self.get_commands(cell)
+            commands = self.get_rawcell_commands(cell)
             if not in_block:
                 if "block" in commands:
                     in_block = True

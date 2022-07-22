@@ -5,10 +5,13 @@ import string
 
 import yaml
 
-import tiedown.book as book
-import tiedown.utils as utils
+import book
+import utils
 
-class TdProject:
+
+#TODO: Mechanism to have raw cells in notebook.
+
+class Project:
 
     def __init__(self, project_path,
                  notebook_prefix=""):
@@ -30,8 +33,9 @@ class TdProject:
         self.index = {}
         self.ignored_files_on_copy = []
 
+        self.ptn_action = re.compile(r"{%([^%]*)%}", re.IGNORECASE)
         self.ptn_insert = None
-        self.ptn_toc = None
+        self.ptn_ignore_cell = re.compile(r"{%\s*ignore\s*%}", re.IGNORECASE)
 
     def get_folders(self, path=None):
         """Gets list of subfolders in project folder.
@@ -67,6 +71,10 @@ class TdProject:
                 yield book.NoteBook(path)
                 index += 1
 
+    def build(self, output_path=None):
+        self.first_pass(output_path)
+        self.second_pass()
+
 #region FIRST PASS #####################################################
 #     Tiedown conducts two different passes over the project files.
 # The methods in this section are used for the first pass.
@@ -95,7 +103,7 @@ class TdProject:
             self._append_page_links(obook)
             self._append_toc_entries(obook)
             self._add_section_numbers(obook)
-            self._append_index_entries(obook)
+            self._parse_markdown_cells(obook)
             obook.remove_raw_cells()
             obook.write()
         self._copy_other_files()
@@ -161,13 +169,13 @@ class TdProject:
 
     def _append_page_links(self, obook):
         """Adds page link to project links table."""
-        cmds = obook.get_commands(0)
+        cmds = obook.get_rawcell_commands(0)
         if "target" in cmds:
-            self.links[cmds["target"]] = obook
+            self.links[cmds["target"]] = (obook, None)
 
     def _append_toc_entries(self, obook):
         """Adds TOC entry to project toc table."""
-        cmds = obook.get_commands(0)
+        cmds = obook.get_rawcell_commands(0)
         if "toc_exclude" not in cmds:
             if "toc_entry" in cmds:
                 toc_entry = cmds["toc_entry"]
@@ -176,9 +184,9 @@ class TdProject:
             if toc_entry is not None:
                 self.toc.append((toc_entry, obook))
 
-    def _append_index_entries(self, obook):
+    def _parse_markdown_cells(self, obook):
         """Appends index entries to project index table."""
-        def _add_index(match):
+        def _parse_cell(match):
             cmd = yaml.load(match.group(1), Loader=yaml.FullLoader)
             if "index" in cmd:
                 index_entries = cmd["index"]
@@ -198,15 +206,15 @@ class TdProject:
                             self.index[(index_key, modifier)].append(link_data)
                         else:
                             self.index[(index_key, modifier)] = [link_data]
-                return ""
-            else:
-                return match.group(0)
+            if "target" in cmd:
+                self.links[cmd["target"]] = (obook, idx)
+            return ""
 
-        if self.ptn_insert is None:
-            self.ptn_insert= re.compile(r"{{([^}]*)}}", re.IGNORECASE)
         for cell in obook.md_cells:
+            if self.ptn_ignore_cell.match(cell["source"]) is not None:
+                continue
             idx = cell["metadata"][utils.Keys.td_cell_index.value]
-            self.ptn_insert.sub(_add_index, cell["source"])
+            self.ptn_action.sub(_parse_cell, cell["source"])
 
     def _copy_subfolder_contents(self, subfolder, output):
         ignored = self.ignored_files_on_copy
@@ -216,12 +224,12 @@ class TdProject:
 
     def _add_section_numbers(self, obook):
         """Adds section numbers to each output notebook."""
-        cmds = obook.get_commands(0)
+        cmds = obook.get_rawcell_commands(0)
         if "outline" in cmds:
             if cmds["outline"] != "None":
                 obook.number_headers(cmds["outline"])
         elif obook.template is not None:
-            tcmds = obook.template.get_commands(0)
+            tcmds = obook.template.get_rawcell_commands(0)
             if "outline" in tcmds and tcmds["outline"] != "None":
                 obook.number_headers(tcmds["outline"])
         # return obook
@@ -252,7 +260,9 @@ class TdProject:
         """
         for obook in self.iter_notebooks(self.output_path):
             for cell in obook.md_cells:
-               cell["source"] = self.parse_inserts(cell, obook)
+                if self.ptn_ignore_cell.match(cell["source"]) is not None:
+                    continue
+                cell["source"] = self.parse_inserts(cell, obook)
             obook.remove_raw_cells()
             obook.remove_code_outputs()
             obook.write()
@@ -261,12 +271,10 @@ class TdProject:
         """Evalutes inline commands in output book."""
         def _replace(match):
             cmd = yaml.load(match.group(1), Loader=yaml.FullLoader)
-            if "rel_link" in cmd:
-                link_parts = cmd["rel_link"].split("#")
-                tgt_nb = self.links[link_parts[0]]
-                rel_link = tgt_nb.rel_link_to(obook)
-                if len(link_parts) > 1:
-                    rel_link = rel_link + "#" + link_parts[1]
+            if "rel_path" in cmd:
+                target_label = cmd["rel_path"]
+                target_nb, target_id = self.links[target_label]
+                rel_link = target_nb.rel_link_to(obook, cell_id=target_id)
                 return "(" + rel_link + ")"
             elif "toc" in cmd:
                 return self.write_toc(obook)

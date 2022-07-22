@@ -5,33 +5,33 @@ import shutil
 import nbformat
 import pytest
 
-import tiedown.book
-import tiedown.project
-import tiedown.utils as utils
+import src.book
+import src.project
+import src.utils as utils
 
 
 @pytest.fixture
 def book1():
     path = pathlib.Path.cwd() / "test_project" / "content" / "a" / "01.ipynb"
-    return tiedown.book.NoteBook(path)
+    return src.book.NoteBook(path)
 
 
 @pytest.fixture
 def book2():
     path = pathlib.Path.cwd() / "test_project" / "content" / "x" / "02.ipynb"
-    return tiedown.book.NoteBook(path)
+    return src.book.NoteBook(path)
 
 
 @pytest.fixture
 def toc():
     path = pathlib.Path.cwd() / "test_project" / "content" / "TOC.ipynb"
-    return tiedown.book.NoteBook(path) 
+    return src.book.NoteBook(path) 
 
 
 @pytest.fixture
 def template():
     path = pathlib.Path.cwd() / "test_project" / "templates" / "main.ipynb"
-    return tiedown.book.Template(path)
+    return src.book.Template(path)
 
 
 def test_folder():
@@ -61,7 +61,7 @@ def test_inserts(template):
 def test_get_titles(book1, book2, toc):
     assert book1.get_title() == "This is the title of Chapter 1"
     assert book2.get_title() is None
-    toc_entry = book2.get_commands(0)["toc_entry"]
+    toc_entry = book2.get_rawcell_commands(0)["toc_entry"]
     assert toc_entry == "This is the title of Chapter 2"
     assert toc.get_title() is None
 
