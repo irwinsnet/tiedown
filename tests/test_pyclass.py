@@ -1,8 +1,8 @@
 import pytest
 
-import src.project
+import project
 
 def test_toc():
-    tdp = src.project.Project("pyclass")
+    tdp = project.Project("example_project")
     tdp.first_pass()
     tdp.second_pass()

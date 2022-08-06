@@ -2,13 +2,13 @@ import copy
 import pathlib
 import pytest
 
-import src.project
-import src.book
+import tiedown.project
+import tiedown.book
 
 
 @pytest.fixture
 def tdproject():
-    return src.project.Project("test_project")
+    return tiedown.project.Project("test_project")
 
 
 @pytest.fixture
@@ -26,13 +26,13 @@ def test_iter_notebook_paths(tdproject):
     books = list(tdproject.iter_notebooks())
     assert len(books) == 3
     assert len(books[0]) == 4
-    assert isinstance(books[0], src.book.NoteBook)
+    assert isinstance(books[0], tiedown.book.NoteBook)
     nb1_path = pathlib.Path(r"content/a/01.ipynb")
     assert books[1].path.relative_to(tdproject.project_path) == nb1_path
 
 
 def test_commands():
-    cbook = src.book.Book()
+    cbook = tiedown.book.Book()
 
     cell_source = r"insert: content"
     cbook.cells.append(cbook.new_raw(source=cell_source))
@@ -59,7 +59,7 @@ def test_get_blocks(tdproject):
     books = list(tdproject.iter_notebooks())
     blocks = books[1].get_blocks()
     assert len(blocks.keys()) == 3
-    assert src.book.Enums.KB_PAGE_COMMANDS in blocks
+    assert tiedown.book.Enums.KB_PAGE_COMMANDS in blocks
     assert len(blocks["content"]) == 3
     assert len(blocks["other_stuff"]) == 2
 

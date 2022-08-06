@@ -1,3 +1,5 @@
+import datetime
+import logging
 import pathlib
 import re
 import shutil
@@ -5,16 +7,23 @@ import string
 
 import yaml
 
-import book
-import utils
+from tiedown.instructions import Actions, Inserts
+import tiedown.book
+import tiedown.utils
 
 
-#TODO: Mechanism to have raw cells in notebook.
+# TODO: Mechanism to have raw cells in notebook.
+# TODO: Remove {% ignore %} statement.
+
+
+class IgnoreError(Exception):
+    pass
+
 
 class Project:
 
     def __init__(self, project_path,
-                 notebook_prefix=""):
+                 notebook_prefix="", log=False):
         """Creates a knotebook project.
 
         Args:
@@ -28,14 +37,30 @@ class Project:
         self.notebook_prefix = notebook_prefix
         self.default_template = "main.ipynb"
         self.output_path = None
-        self.links = {}
+        self.labels = {}
         self.toc = []
         self.index = {}
         self.ignored_files_on_copy = []
 
         self.ptn_action = re.compile(r"{%([^%]*)%}", re.IGNORECASE)
-        self.ptn_insert = None
+        self.ptn_insert = re.compile(r"{{([^}]*)}}", re.IGNORECASE)
         self.ptn_ignore_cell = re.compile(r"{%\s*ignore\s*%}", re.IGNORECASE)
+
+        self._ignore = False
+
+        if log:
+            log_filename = ("build-log-" + 
+                datetime.datetime.now().strftime("%Y%M%d-%H%M%S"))
+            log_path = project_path / log_filename
+            logging.basicConfig(filename=log_path, encoding="UTF-8",
+                                level=logging.DEBUG)
+        else:
+            logging.basicConfig(level=logging.WARNING)
+        logging.info("Tiedown Build Log")
+        logging.info(f"Commenced Build: {datetime.datetime.now()}")
+        logging.info("Project Path: %s", self.project_path)
+        logging.info("Content Path: %s", self.content_path)
+
 
     def get_folders(self, path=None):
         """Gets list of subfolders in project folder.
@@ -68,7 +93,7 @@ class Project:
             nb_paths = list(folder.glob(f"{self.notebook_prefix}*.ipynb"))
             sorted_nbpaths = sorted(nb_paths, key=lambda x: x.name)
             for path in sorted_nbpaths:
-                yield book.NoteBook(path)
+                yield tiedown.book.NoteBook(path)
                 index += 1
 
     def build(self, output_path=None):
@@ -98,7 +123,9 @@ class Project:
               a string. Defaults to "output". 
         """
         self.output_path = self._create_output_folder(output_path)
+        logging.info("Output Path: %s", self.output_path)
         for obook in self._iter_output_notebooks():
+            logging.debug("Parsing: %s", obook.path)
             obook.add_cell_ids()            
             self._append_page_links(obook)
             self._append_toc_entries(obook)
@@ -131,25 +158,29 @@ class Project:
         Creates and yields a new output notebook for each content
         notebook.
         """
-        subfolder = None
         for cbook in self.iter_notebooks():
-            subfolder = self._copy_folder_contents(subfolder, cbook)
-            yield self._create_output_notebook(subfolder, cbook)
+            output_subfolder = self._prepare_output_subfolder(cbook)
+            yield self._create_output_notebook(cbook, output_subfolder)
 
-    def _copy_folder_contents(self, subfolder, cbook):
-        """Copies folder contents to the output folder."""
-        if cbook.path != subfolder:
-            # Check for knotbooks in top-level folder
-            if cbook.path.parent == self.content_path:
-                subfolder = self.output_path
-            # Process knotbooks in subfolders
-            else:
-                subfolder = self.output_path / cbook.path.parts[-2]
-                self._copy_subfolder_contents(cbook.path.parent, subfolder)
-                # subfolder.mkdir()
+    def _prepare_output_subfolder(self, cbook):
+        """Creates new output folder (if needed) and copies files.
+
+        Args:
+            cbook: A content notebook.
+        
+        Returns: pathlib.Path to output folder that will contain
+        corresponding output notebook.
+        """
+        if cbook.path.parent == self.content_path:
+            subfolder = self.output_path
+        else:
+            subfolder = self.output_path / cbook.path.parts[-2]
+
+        if not subfolder.exists():
+            self._copy_subfolder_contents(cbook.path.parent, subfolder)
         return subfolder
 
-    def _create_output_notebook(self, subfolder, cbook):
+    def _create_output_notebook(self, cbook, subfolder):
         """Creates an output notebook."""
         template_name = cbook.get_template_name()
         if template_name is not None:
@@ -165,39 +196,50 @@ class Project:
         """Retrieves a template file."""
         if template_name == "":
             template_name = self.default_template
-        return book.Template(self.template_folder_path / template_name)
+        return tiedown.book.Template(self.template_folder_path / template_name)
 
     def _append_page_links(self, obook):
         """Adds page link to project links table."""
         cmds = obook.get_rawcell_commands(0)
-        if "target" in cmds:
-            self.links[cmds["target"]] = (obook, None)
+        if Actions.label in cmds:
+            self.labels[cmds[Actions.label]] = (obook, None)
 
     def _append_toc_entries(self, obook):
         """Adds TOC entry to project toc table."""
         cmds = obook.get_rawcell_commands(0)
-        if "toc_exclude" not in cmds:
-            if "toc_entry" in cmds:
-                toc_entry = cmds["toc_entry"]
+        if Actions.toc_exclude not in cmds:
+            if Actions.toc_entry in cmds:
+                toc_entry = cmds[Actions.toc_entry]
             else:
                 toc_entry = obook.title
             if toc_entry is not None:
                 self.toc.append((toc_entry, obook))
 
-    def _parse_markdown_cells(self, obook):
-        """Appends index entries to project index table."""
-        def _parse_cell(match):
-            cmd = yaml.load(match.group(1), Loader=yaml.FullLoader)
-            if "index" in cmd:
-                index_entries = cmd["index"]
+    @staticmethod
+    def _load_commands(match):
+        cmd = yaml.load(match.group(1), Loader=yaml.FullLoader)
+        return {cmd: None} if isinstance(cmd, str) else cmd
+
+
+    def _parser_pass1(self, match, obook, idx):
+        # Figure out whether actions or inserts should be ignored.
+        cmd = self._load_commands(match)
+        if Actions.end_ignore in cmd:
+            self._ignore = False
+        elif Actions.ignore in cmd:
+            self._ignore = True
+
+        if not self._ignore:
+            if Actions.index in cmd:
+                index_entries = cmd[Actions.index]
                 if isinstance(index_entries, str):
                     index_entries = [{index_entries: None}]
                 for entry in index_entries:
                     exp_entry = {entry: None} if isinstance(entry, str) else entry
                     for term, modifier in exp_entry.items():
-                        if modifier == 'code':
+                        if modifier == Actions.code:
                             index_key = term
-                        elif modifier == 'preserve_case':
+                        elif modifier == Actions.preserve_case:
                             index_key = term
                         else:
                             index_key = term.lower()
@@ -206,15 +248,18 @@ class Project:
                             self.index[(index_key, modifier)].append(link_data)
                         else:
                             self.index[(index_key, modifier)] = [link_data]
-            if "target" in cmd:
-                self.links[cmd["target"]] = (obook, idx)
-            return ""
+            if Actions.label in cmd:
+                self.labels[cmd[Actions.label]] = (obook, idx)
+        return match.group(0)
 
+    def _parse_markdown_cells(self, obook):
+        """Appends index entries to project index table."""
         for cell in obook.md_cells:
-            if self.ptn_ignore_cell.match(cell["source"]) is not None:
-                continue
-            idx = cell["metadata"][utils.Keys.td_cell_index.value]
-            self.ptn_action.sub(_parse_cell, cell["source"])
+            self._ignore = False
+            idx = cell["metadata"][tiedown.utils.Keys.td_cell_index.value]
+            self.ptn_action.sub(
+                lambda match: self._parser_pass1(match, obook, idx),
+                cell.source)
 
     def _copy_subfolder_contents(self, subfolder, output):
         ignored = self.ignored_files_on_copy
@@ -224,14 +269,18 @@ class Project:
 
     def _add_section_numbers(self, obook):
         """Adds section numbers to each output notebook."""
+        # First check the current content book for numbering instructions.
+        # If present, current content book settingw will override
+        # template.
         cmds = obook.get_rawcell_commands(0)
-        if "outline" in cmds:
-            if cmds["outline"] != "None":
-                obook.number_headers(cmds["outline"])
+        if Actions.outline in cmds:
+            if cmds[Actions.outline] != "None":
+                obook.number_headers(cmds[Actions.outline])
+        # If no outline command in current content book, check the template.
         elif obook.template is not None:
             tcmds = obook.template.get_rawcell_commands(0)
-            if "outline" in tcmds and tcmds["outline"] != "None":
-                obook.number_headers(tcmds["outline"])
+            if Actions.outline in tcmds and tcmds[Actions.outline] != "None":
+                obook.number_headers(tcmds[Actions.outline])
         # return obook
 
     def _copy_other_files(self):
@@ -258,37 +307,58 @@ class Project:
         * Removes raw cells.
         * Removes cell outputs.
         """
+        logging.info("Starting 2nd Pass")
         for obook in self.iter_notebooks(self.output_path):
+            logging.debug("Parsing: %s", obook.path)
             for cell in obook.md_cells:
-                if self.ptn_ignore_cell.match(cell["source"]) is not None:
-                    continue
-                cell["source"] = self.parse_inserts(cell, obook)
+                self._ignore = False
+                source_actions_processed = self.ptn_action.sub(
+                    self._parser_actions_pass2,
+                    cell.source)
+                cell.source = self.ptn_insert.sub(
+                    lambda match: self._parser_inserts_pass2(match, obook),
+                    source_actions_processed).strip()
             obook.remove_raw_cells()
             obook.remove_code_outputs()
             obook.write()
+        logging.shutdown()
 
-    def parse_inserts(self, cell, obook):
-        """Evalutes inline commands in output book."""
-        def _replace(match):
-            cmd = yaml.load(match.group(1), Loader=yaml.FullLoader)
-            if "rel_path" in cmd:
-                target_label = cmd["rel_path"]
-                target_nb, target_id = self.links[target_label]
+    def _parser_actions_pass2(self, match):
+        logging.debug("Match: %s", match)
+        logging.debug("Match Group: %s", match.group(1))
+        cmd = self._load_commands(match)
+
+        if Actions.end_ignore in cmd and self._ignore:
+            self._ignore = False
+            return ""
+        elif Actions.ignore in cmd and not self._ignore:
+            self._ignore = True
+            return ""
+        elif self._ignore:
+            return match.group(0)
+        else:
+            return ""
+
+    def _parser_inserts_pass2(self, match, obook):
+        logging.debug("Match: %s", match)
+        logging.debug("Match Group: %s", match.group(1))
+        cmd = self._load_commands(match)
+
+        if not self._ignore:
+            if Inserts.rel_path in cmd:
+                target_label = cmd[Inserts.rel_path]
+                target_nb, target_id = self.labels[target_label]
                 rel_link = target_nb.rel_link_to(obook, cell_id=target_id)
                 return "(" + rel_link + ")"
-            elif "toc" in cmd:
+            elif Inserts.toc in cmd:
                 return self.write_toc(obook)
-            elif "write_index_section" in cmd:
-                return self.write_index_section(cmd["write_index_section"],
-                                                obook)
-            elif "skip" in cmd:
-                return ""
-            elif "id" in cmd:
+            elif Inserts.write_index_section in cmd:
+                return self.write_index_section(
+                    cmd[Inserts.write_index_section], obook)
+            elif Inserts.id in cmd:
                 return f'<span id="{cmd["id"]}"/>'
-
-        if self.ptn_insert is None:
-            self.ptn_insert = re.compile(r"{{([^}]*)}}", re.IGNORECASE)
-        return self.ptn_insert.sub(_replace, cell["source"])
+        else:
+            return match.group(0) # Return match unchanged when ignoring
 
     def write_toc(self, obook):
         """Writes Table of Contents (TOC).

@@ -7,7 +7,7 @@ import re
 import nbformat
 import yaml
 
-import utils
+import tiedown.utils as utils
 
 class Enums(enum.Enum):
     KB_PAGE_COMMANDS = 0

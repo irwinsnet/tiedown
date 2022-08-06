@@ -5,33 +5,33 @@ import shutil
 import nbformat
 import pytest
 
-import src.book
-import src.project
-import src.utils as utils
+import tiedown.book
+import tiedown.project
+import tiedown.utils as utils
 
 
 @pytest.fixture
 def book1():
     path = pathlib.Path.cwd() / "test_project" / "content" / "a" / "01.ipynb"
-    return src.book.NoteBook(path)
+    return tiedown.book.NoteBook(path)
 
 
 @pytest.fixture
 def book2():
     path = pathlib.Path.cwd() / "test_project" / "content" / "x" / "02.ipynb"
-    return src.book.NoteBook(path)
+    return tiedown.book.NoteBook(path)
 
 
 @pytest.fixture
 def toc():
     path = pathlib.Path.cwd() / "test_project" / "content" / "TOC.ipynb"
-    return src.book.NoteBook(path) 
+    return tiedown.book.NoteBook(path) 
 
 
 @pytest.fixture
 def template():
     path = pathlib.Path.cwd() / "test_project" / "templates" / "main.ipynb"
-    return src.book.Template(path)
+    return tiedown.book.Template(path)
 
 
 def test_folder():

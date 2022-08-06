@@ -8,7 +8,7 @@
 * If `<template_name>` is set to `None`, no template is used.
 * If this command is missing, Knotbooks will use the `main.py` template.
 
-```{% block <block_name> %}```
+```{% block: <block_name> %}```
 * Used in a content file.
 * Identifies the start of a block.
 

@@ -11,7 +11,7 @@ class Keys(enum.Enum):
 
 class Commands(enum.Enum):
     index = "index"
-    target = "target"
+    target = "label"
     toc_entry = "toc_entry"
     toc_exclude = "toc_exclude"
 
