@@ -16,8 +16,9 @@ import tiedown.utils
 # TODO: Remove {% ignore %} statement.
 
 
-class IgnoreError(Exception):
-    pass
+class MetaKeys:
+    # Noteboook Metadata
+    toc_index = "tiedown.toc_index"
 
 
 class Project:
@@ -39,12 +40,12 @@ class Project:
         self.output_path = None
         self.labels = {}
         self.toc = []
+        self.books = []
         self.index = {}
         self.ignored_files_on_copy = []
 
         self.ptn_action = re.compile(r"{%([^%]*)%}", re.IGNORECASE)
         self.ptn_insert = re.compile(r"{{([^}]*)}}", re.IGNORECASE)
-        self.ptn_ignore_cell = re.compile(r"{%\s*ignore\s*%}", re.IGNORECASE)
 
         self._ignore = False
 
@@ -122,12 +123,13 @@ class Project:
             output_path: Optional. The name of the output folder as
               a string. Defaults to "output". 
         """
+        prior_book = None
         self.output_path = self._create_output_folder(output_path)
         logging.info("Output Path: %s", self.output_path)
         for obook in self._iter_output_notebooks():
             logging.debug("Parsing: %s", obook.path)
             obook.add_cell_ids()            
-            self._append_page_links(obook)
+            self._append_command_cell_labels(obook)
             self._append_toc_entries(obook)
             self._add_section_numbers(obook)
             self._parse_markdown_cells(obook)
@@ -198,7 +200,7 @@ class Project:
             template_name = self.default_template
         return tiedown.book.Template(self.template_folder_path / template_name)
 
-    def _append_page_links(self, obook):
+    def _append_command_cell_labels(self, obook):
         """Adds page link to project links table."""
         cmds = obook.get_rawcell_commands(0)
         if Actions.label in cmds:
@@ -214,6 +216,7 @@ class Project:
                 toc_entry = obook.title
             if toc_entry is not None:
                 self.toc.append((toc_entry, obook))
+                obook.metadata[MetaKeys.toc_index] = len(self.toc) - 1
 
     @staticmethod
     def _load_commands(match):
@@ -226,6 +229,8 @@ class Project:
         cmd = self._load_commands(match)
         if Actions.end_ignore in cmd:
             self._ignore = False
+        elif Actions.label in cmd:
+            self.labels[cmd[Actions.label]] = (obook, idx)
         elif Actions.ignore in cmd:
             self._ignore = True
 
@@ -316,7 +321,7 @@ class Project:
                     self._parser_actions_pass2,
                     cell.source)
                 cell.source = self.ptn_insert.sub(
-                    lambda match: self._parser_inserts_pass2(match, obook),
+                    lambda match: self._parser_inserts_pass2(match, obook, cell),
                     source_actions_processed).strip()
             obook.remove_raw_cells()
             obook.remove_code_outputs()
@@ -339,7 +344,7 @@ class Project:
         else:
             return ""
 
-    def _parser_inserts_pass2(self, match, obook):
+    def _parser_inserts_pass2(self, match, obook, cell):
         logging.debug("Match: %s", match)
         logging.debug("Match Group: %s", match.group(1))
         cmd = self._load_commands(match)
@@ -348,8 +353,7 @@ class Project:
             if Inserts.rel_path in cmd:
                 target_label = cmd[Inserts.rel_path]
                 target_nb, target_id = self.labels[target_label]
-                rel_link = target_nb.rel_link_to(obook, cell_id=target_id)
-                return "(" + rel_link + ")"
+                return target_nb.rel_link_to(obook, cell_id=target_id)
             elif Inserts.toc in cmd:
                 return self.write_toc(obook)
             elif Inserts.write_index_section in cmd:
@@ -357,6 +361,29 @@ class Project:
                     cmd[Inserts.write_index_section], obook)
             elif Inserts.id in cmd:
                 return f'<span id="{cmd["id"]}"/>'
+            elif Inserts.link_prev in cmd:
+                toc_idx = obook.metadata.get(MetaKeys.toc_index)
+                if toc_idx in [0, None]:
+                    return ""
+                else:
+                    prev_book = self.toc[toc_idx - 1][1]
+                    if cmd[Inserts.link_prev] is None:
+                        link_text = self.toc[toc_idx - 1][0]
+                    else:
+                        link_text = cmd[Inserts.link_prev]
+                    return f"[{link_text}]({prev_book.rel_link_to(obook)})"
+            elif Inserts.link_next in cmd:
+                toc_idx = obook.metadata.get(MetaKeys.toc_index)
+                if toc_idx is None or toc_idx >= len(self.toc) - 1:
+                    return ""
+                else:
+                    next_book = self.toc[toc_idx + 1][1]
+                    if cmd[Inserts.link_next] is None:
+                        link_text = self.toc[toc_idx + 1][0]
+                    else:
+                        link_text = cmd[Inserts.link_next]
+                    return f"[{link_text}]({next_book.rel_link_to(obook)})"
+
         else:
             return match.group(0) # Return match unchanged when ignoring
 

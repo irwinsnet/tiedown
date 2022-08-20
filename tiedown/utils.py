@@ -83,6 +83,7 @@ outline_mapper = {
     "A": letters_from_int,
     "a": lambda x: letters_from_int(x, lower=True),
     "1": str,
+    "_": lambda x: "",
     "": lambda x: ""
 }
 
