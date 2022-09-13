@@ -9,16 +9,12 @@ import yaml
 
 from tiedown.instructions import Actions, Inserts
 import tiedown.book
+import tiedown.toc
 import tiedown.utils
 
 
 # TODO: Mechanism to have raw cells in notebook.
 # TODO: Remove {% ignore %} statement.
-
-
-class MetaKeys:
-    # Noteboook Metadata
-    toc_index = "tiedown.toc_index"
 
 
 class Project:
@@ -38,9 +34,8 @@ class Project:
         self.notebook_prefix = notebook_prefix
         self.default_template = "main.ipynb"
         self.output_path = None
-        self.labels = {}
-        self.toc = []
         self.books = []
+        self.labels = {}
         self.index = {}
         self.ignored_files_on_copy = []
 
@@ -48,6 +43,9 @@ class Project:
         self.ptn_insert = re.compile(r"{{([^}]*)}}", re.IGNORECASE)
 
         self._ignore = False
+
+        self.ext = {}
+        self.add_tiedown_extension(tiedown.toc.Toc(self))
 
         if log:
             log_filename = ("build-log-" + 
@@ -61,6 +59,9 @@ class Project:
         logging.info(f"Commenced Build: {datetime.datetime.now()}")
         logging.info("Project Path: %s", self.project_path)
         logging.info("Content Path: %s", self.content_path)
+
+    def add_tiedown_extension(self, extension):
+        self.ext[extension.name] = extension
 
 
     def get_folders(self, path=None):
@@ -128,9 +129,16 @@ class Project:
         logging.info("Output Path: %s", self.output_path)
         for obook in self._iter_output_notebooks():
             logging.debug("Parsing: %s", obook.path)
-            obook.add_cell_ids()            
+            obook.add_cell_ids()
+            logging.debug("\t\tAdded cell IDs")        
             self._append_command_cell_labels(obook)
-            self._append_toc_entries(obook)
+
+            # run book-level first-pass extension methods
+            extensions = sorted(self.ext.values(),
+                                key=lambda x: x.bookpass1_priority)
+            for extension in extensions:
+                extension.bookpass1(obook)
+            # self._append_toc_entries(obook)
             self._add_section_numbers(obook)
             self._parse_markdown_cells(obook)
             obook.remove_raw_cells()
@@ -191,7 +199,7 @@ class Project:
         else:
             nb = cbook
         nb.path = subfolder / cbook.path.parts[-1]
-        nb.title = cbook.get_title()
+        # nb.title = cbook.get_title()
         return nb
 
     def _get_template(self, template_name=""):
@@ -202,12 +210,14 @@ class Project:
 
     def _append_command_cell_labels(self, obook):
         """Adds page link to project links table."""
+        logging.debug("\t\tAppending Command Cell labels")      
         cmds = obook.get_rawcell_commands(0)
         if Actions.label in cmds:
             self.labels[cmds[Actions.label]] = (obook, None)
 
     def _append_toc_entries(self, obook):
         """Adds TOC entry to project toc table."""
+        logging.debug("\t\tAppending TOC Entries")      
         cmds = obook.get_rawcell_commands(0)
         if Actions.toc_exclude not in cmds:
             if Actions.toc_entry in cmds:
@@ -216,7 +226,7 @@ class Project:
                 toc_entry = obook.title
             if toc_entry is not None:
                 self.toc.append((toc_entry, obook))
-                obook.metadata[MetaKeys.toc_index] = len(self.toc) - 1
+                obook.metadata["tiedown_toc_index"] = len(self.ext["tiedown_toc"]) - 1
 
     @staticmethod
     def _load_commands(match):
@@ -259,7 +269,8 @@ class Project:
 
     def _parse_markdown_cells(self, obook):
         """Appends index entries to project index table."""
-        for cell in obook.md_cells:
+        for cell_number, cell in enumerate(obook.md_cells):
+            logging.debug(f"\tCell: {cell_number}, Source: {cell.source[:25]}")    
             self._ignore = False
             idx = cell["metadata"][tiedown.utils.Keys.td_cell_index.value]
             self.ptn_action.sub(
@@ -272,8 +283,9 @@ class Project:
         shutil.copytree(
             subfolder, output, ignore=shutil.ignore_patterns(*ignored))
 
-    def _add_section_numbers(self, obook):
+    def _add_section_numbers(self, obook):  
         """Adds section numbers to each output notebook."""
+        logging.debug("\t\tAdding Section Numbers")    
         # First check the current content book for numbering instructions.
         # If present, current content book settingw will override
         # template.
@@ -318,7 +330,7 @@ class Project:
             for cell in obook.md_cells:
                 self._ignore = False
                 source_actions_processed = self.ptn_action.sub(
-                    self._parser_actions_pass2,
+                    lambda match: self._parser_actions_pass2(match, obook, cell),
                     cell.source)
                 cell.source = self.ptn_insert.sub(
                     lambda match: self._parser_inserts_pass2(match, obook, cell),
@@ -328,7 +340,7 @@ class Project:
             obook.write()
         logging.shutdown()
 
-    def _parser_actions_pass2(self, match):
+    def _parser_actions_pass2(self, match, obook, cell):
         logging.debug("Match: %s", match)
         logging.debug("Match Group: %s", match.group(1))
         cmd = self._load_commands(match)
@@ -344,65 +356,61 @@ class Project:
         else:
             return ""
 
+    def iter_extension_inserts(self):
+        extensions = sorted(self.ext.values(),
+                            key=lambda x: x.cellpass2_inserts_priority)
+        for extension in extensions:
+            for insert in dir(extension.Inserts()):
+                yield insert, extension
+
     def _parser_inserts_pass2(self, match, obook, cell):
         logging.debug("Match: %s", match)
         logging.debug("Match Group: %s", match.group(1))
         cmd = self._load_commands(match)
+
+        for insert, extension in self.iter_extension_inserts():
+            if insert in cmd:
+                return extension.cellpass2_inserts(match, obook, cell)
+
 
         if not self._ignore:
             if Inserts.rel_path in cmd:
                 target_label = cmd[Inserts.rel_path]
                 target_nb, target_id = self.labels[target_label]
                 return target_nb.rel_link_to(obook, cell_id=target_id)
-            elif Inserts.toc in cmd:
-                return self.write_toc(obook)
+            # elif Inserts.toc in cmd:
+            #     return self.write_toc(obook)
             elif Inserts.write_index_section in cmd:
                 return self.write_index_section(
                     cmd[Inserts.write_index_section], obook)
             elif Inserts.id in cmd:
                 return f'<span id="{cmd["id"]}"/>'
             elif Inserts.link_prev in cmd:
-                toc_idx = obook.metadata.get(MetaKeys.toc_index)
+                toc_idx = obook.metadata.get("tiedown.toc_index")
                 if toc_idx in [0, None]:
                     return ""
                 else:
-                    prev_book = self.toc[toc_idx - 1][1]
+                    prev_book = self.ext["tiedown_toc"][toc_idx - 1][1]
                     if cmd[Inserts.link_prev] is None:
-                        link_text = self.toc[toc_idx - 1][0]
+                        link_text = self.ext["tiedown_toc"][toc_idx - 1][0]
                     else:
                         link_text = cmd[Inserts.link_prev]
                     return f"[{link_text}]({prev_book.rel_link_to(obook)})"
             elif Inserts.link_next in cmd:
-                toc_idx = obook.metadata.get(MetaKeys.toc_index)
-                if toc_idx is None or toc_idx >= len(self.toc) - 1:
+                toc_idx = obook.metadata.get("tiedown.toc_index")
+                if (toc_idx is None or
+                    toc_idx >= len(self.ext["tiedown_toc"]) - 1):
                     return ""
                 else:
-                    next_book = self.toc[toc_idx + 1][1]
+                    next_book = self.ext["tiedown_toc"][toc_idx + 1][1]
                     if cmd[Inserts.link_next] is None:
-                        link_text = self.toc[toc_idx + 1][0]
+                        link_text = self.ext["tiedown_toc"][toc_idx + 1][0]
                     else:
                         link_text = cmd[Inserts.link_next]
                     return f"[{link_text}]({next_book.rel_link_to(obook)})"
 
         else:
             return match.group(0) # Return match unchanged when ignoring
-
-    def write_toc(self, obook):
-        """Writes Table of Contents (TOC).
-        
-        Args:
-            obook: Output notebook that will contain TOC.
-
-        Returns: TOC as HTML text.        
-        """
-        toc = []
-        entry_num = 1
-        for entry in self.toc:
-            text = entry[0]
-            link = entry[1].rel_link_to(obook)
-            toc.append(f"{entry_num}. [{text}]({link})")
-            entry_num += 1
-        return "\n".join(toc)
 
     def get_index_section(self, section_range):
         section = {}
