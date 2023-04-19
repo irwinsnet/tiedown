@@ -235,17 +235,18 @@ class NoteBook(Book):
             cell["source"] = "\n".join(lines)
 
 
-    def add_cell_ids(self):
-        """Adds a <span> element with a unique ID to each markdown cell."""
+    def add_cell_ids(self, colab=False):
+        """Adds empty <a> element with a unique ID to markdown cells."""
         cell_index = 1
         for cell in self.md_cells:
             cell["metadata"][utils.Keys.td_cell_index.value] = f"cid{cell_index}"
-            cell_span = f'<span id="cid{cell_index}"/>'
-            # Place span at end of first line. Placing span at beginning
-            # of cell messes up Markdown rendering (paragraph spacing) in Jupyter.
-            cell_lines = cell.source.split("\n")
-            cell_lines[0] = cell_lines[0] + cell_span
-            cell.source = "\n".join(cell_lines) #cell_span + "\n" + cell["source"]
+            # Google Colab cell links only work with the name attribute, whereas
+            # Jupyter notebooks require the id attribute.
+            if colab:
+                cell_anchor = f'<a name="cid{cell_index}"></a>'
+            else:
+                cell_anchor = f'<a id="cid{cell_index}"></a>'
+            cell.source = cell_anchor + "\n" +  cell.source
             cell_index += 1
 
     def remove_raw_cells(self):

@@ -2,9 +2,5 @@
 .vscode
 **/.pytest_cache
 **/__pycache__
-kbtest.ipynb
-index-old.ipynb
-knotbook-demo.ipynb
-knotbook-test.ipynb
-pyclass-build.ipynb
+/notebooks/
 pyclass/

@@ -20,7 +20,7 @@ import tiedown.utils
 class Project:
 
     def __init__(self, project_path,
-                 notebook_prefix="", log=False):
+                 notebook_prefix="", colab=False, log=False, ):
         """Creates a knotebook project.
 
         Args:
@@ -38,8 +38,9 @@ class Project:
         self.labels = {}
         self.index = {}
         self.ignored_files_on_copy = []
+        self.optimize_for_colab = colab
 
-        self.ptn_action = re.compile(r"{%([^%]*)%}", re.IGNORECASE)
+        self.ptn_action = re.compile(r"{%([^}]*)%}", re.IGNORECASE)
         self.ptn_insert = re.compile(r"{{([^}]*)}}", re.IGNORECASE)
 
         self._ignore = False
@@ -129,7 +130,7 @@ class Project:
         logging.info("Output Path: %s", self.output_path)
         for obook in self._iter_output_notebooks():
             logging.debug("Parsing: %s", obook.path)
-            obook.add_cell_ids()
+            obook.add_cell_ids(self.optimize_for_colab)
             logging.debug("\t\tAdded cell IDs")        
             self._append_command_cell_labels(obook)
 

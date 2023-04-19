@@ -8,8 +8,8 @@ class Actions():
     insert = "insert"        # Inserts content block into template
     template = "template"    # Specifies which template should be used.
     # Table of Content Actions
-    toc_exclude = "toc_exclude"  # Excludes notebook from TOC
-    toc_entry = "toc_entry"      # Specify text for TOC entry
+    # toc_exclude = "toc_exclude"  # Excludes notebook from TOC
+    # toc_entry = "toc_entry"      # Specify text for TOC entry
     # Section Numbering
     outline = "outline"     # Sets section numbering formats
     skip = "skip"           # Skips header when numbering
@@ -22,7 +22,7 @@ class Actions():
     end_ignore = "end_ignore"
 
 class Inserts():
-    toc = "toc"            # Insert a TOC
+    # toc = "toc"            # Insert a TOC
     rel_path = "rel_path"  # Creates a relative path to another notebook
     write_index_section = "write_index_section"  # Writes part of index
     id = "id"

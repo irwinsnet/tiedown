@@ -92,4 +92,19 @@ Variables can't use the following reserved names:
 Define variables in top command cell.
 `{% define mod_date 2022-06-04 }`
 
+## Index
+`{% index: index-term}`
+
+```
+{% index:
+  - term1
+  - term2: code
+  - term3: preserve_case}
+```
+
+The index logic will convert terms to title case by default. The
+*preserve_case* and *code* modifiers cause Tiedown to leave the term's
+case as is. The *code* modifier also causes the term to be given
+markdown code highlighting, as if the term were enclosed in tick marks. 
+
 
